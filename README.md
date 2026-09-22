@@ -110,7 +110,7 @@ of downloading again, so the bootstrap above costs exactly one fetch.
 
 Then reload the GUI and open **Firewall → Parental Control**.
 
-## The two configd actions
+## The three configd actions
 
     configctl parentalcontrol sync        re-evaluate every device, sync the alias
     configctl parentalcontrol install     re-fetch the plugin from upstream
