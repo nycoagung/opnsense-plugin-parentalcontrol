@@ -3,7 +3,8 @@
         <name>Firewall: Parental Control</name>
         <patterns>
             <pattern>ui/parentalcontrol/*</pattern>
-            <pattern>api/parentalcontrol/*</pattern>
+            <pattern>api/parentalcontrol/settings/*</pattern>
+            <pattern>api/parentalcontrol/service/*</pattern>
         </patterns>
     </page-firewall-parentalcontrol>
 </acl>

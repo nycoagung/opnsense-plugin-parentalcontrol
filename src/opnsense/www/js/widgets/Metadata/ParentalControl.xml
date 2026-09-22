@@ -3,7 +3,8 @@
         <filename>ParentalControl.js</filename>
         <link>/ui/parentalcontrol</link>
         <endpoints>
-            <endpoint>/api/parentalcontrol/*</endpoint>
+            <endpoint>/api/parentalcontrol/settings/*</endpoint>
+            <endpoint>/api/parentalcontrol/service/*</endpoint>
         </endpoints>
         <translations>
             <title>Parental Control</title>

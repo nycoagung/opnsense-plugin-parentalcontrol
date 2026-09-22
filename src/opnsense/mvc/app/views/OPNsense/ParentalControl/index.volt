@@ -36,7 +36,6 @@
         mapDataToFormUI(data_get_map).done(function () {
             formatTokenizersUI();
             $('.selectpicker').selectpicker('refresh');
-            updateServiceControlUI('parentalcontrol');
         });
 
         $("#saveAct").click(function () {
