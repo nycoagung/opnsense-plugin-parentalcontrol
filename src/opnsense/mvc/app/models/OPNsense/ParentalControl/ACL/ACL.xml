@@ -1,0 +1,9 @@
+<acl>
+    <page-firewall-parentalcontrol>
+        <name>Firewall: Parental Control</name>
+        <patterns>
+            <pattern>ui/parentalcontrol/*</pattern>
+            <pattern>api/parentalcontrol/*</pattern>
+        </patterns>
+    </page-firewall-parentalcontrol>
+</acl>

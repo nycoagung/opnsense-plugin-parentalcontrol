@@ -1,0 +1,9 @@
+Turn a device's internet access on or off, on a schedule or on demand.
+
+Adds a settings page under Firewall and a dashboard widget with per-device
+toggles. Enforcement is a single firewall rule against a single externally
+managed alias, so switching a device takes effect immediately without a
+ruleset reload.
+
+Blocked devices lose internet only - local services such as printers, media
+players and dashboards keep working.
