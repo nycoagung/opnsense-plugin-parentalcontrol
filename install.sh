@@ -82,11 +82,24 @@ for entry in $FILES; do
     [ -f "$SRC/$s" ] || { echo "missing from source: $s" >&2; exit 1; }
 done
 
+# Stage beside the destination, then rename into place.
+#
+# This is not just about atomicity. This script installs ITSELF, and sh reads a
+# script incrementally: cp rewrites the same inode, so the running shell's read
+# offset lands in shifted bytes and it dies mid-file. Reproduced exactly - a
+# self-cp of a different-length script exits 2, which is what
+# 'configctl parentalcontrol install' reported. mv creates a new inode and
+# leaves the running script's open file untouched.
 for entry in $FILES; do
     [ -n "$entry" ] || continue
     s=${entry%%|*}; d=${entry#*|}
     mkdir -p "$(dirname "$d")"
-    cp "$SRC/$s" "$d"
+    cp "$SRC/$s" "$d.pcnew"
+done
+for entry in $FILES; do
+    [ -n "$entry" ] || continue
+    s=${entry%%|*}; d=${entry#*|}
+    mv "$d.pcnew" "$d"
     case "$d" in *.php|*.sh) chmod 0755 "$d" ;; *) chmod 0644 "$d" ;; esac
     printf '  %-34s %6d bytes\n' "$(basename "$s")" "$(wc -c < "$d" | tr -d ' ')"
 done
