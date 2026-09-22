@@ -24,6 +24,7 @@ require_once("util.inc");
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\Firewall\Alias;
+use OPNsense\Cron\Cron;
 use OPNsense\Firewall\Filter;
 use OPNsense\ParentalControl\ParentalControl;
 
@@ -147,6 +148,78 @@ function macToAddresses($mac)
     return isset($leases[$mac]) ? array_values(array_unique($leases[$mac])) : [];
 }
 
+/**
+ * The schedule is only ever re-evaluated when this script runs, so the cron
+ * entry is not optional - without it the UI would show the right answer while
+ * nothing actually changed. The plugin therefore owns the job: created when
+ * enabled, disabled when the plugin is disabled.
+ *
+ * Only writes when something genuinely differs. This runs once a minute, and
+ * saving the config every minute would bloat the revision history for nothing.
+ */
+function ensureCronJob($backend, $enabled)
+{
+    $cron = new Cron();
+    $want = $enabled ? '1' : '0';
+    $found = null;
+    foreach ($cron->jobs->job->iterateItems() as $job) {
+        if ((string)$job->origin === 'parentalcontrol'
+            && (string)$job->command === 'parentalcontrol sync') {
+            $found = $job;
+            break;
+        }
+    }
+
+    $changed = false;
+    if ($found === null) {
+        if (!$enabled) {
+            return false;               /* nothing to create, nothing to disable */
+        }
+        $job = $cron->jobs->job->Add();
+        $job->origin = 'parentalcontrol';
+        $job->enabled = '1';
+        $job->minutes = '*';
+        $job->hours = '*';
+        $job->days = '*';
+        $job->months = '*';
+        $job->weekdays = '*';
+        $job->who = 'root';
+        $job->command = 'parentalcontrol sync';
+        $job->parameters = '';
+        $job->description = 'Parental Control: evaluate device schedules';
+        $changed = true;
+    } elseif ((string)$found->enabled !== $want) {
+        $found->enabled = $want;
+        $changed = true;
+    }
+
+    if (!$changed) {
+        return false;
+    }
+    $val = $cron->performValidation();
+    if ($val->count() > 0) {
+        foreach ($val->getMessages() as $msg) {
+            fwrite(STDERR, "cron: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
+        }
+        return false;
+    }
+    $cron->serializeToConfig();
+    Config::getInstance()->save();
+    $backend->configdRun('cron reconfigure');
+    return true;
+}
+
+function cronState()
+{
+    foreach ((new Cron())->jobs->job->iterateItems() as $job) {
+        if ((string)$job->origin === 'parentalcontrol'
+            && (string)$job->command === 'parentalcontrol sync') {
+            return (string)$job->enabled === '1' ? 'enabled' : 'disabled';
+        }
+    }
+    return 'absent';
+}
+
 function timeToMinutes($v)
 {
     if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $v, $m)) {
@@ -218,6 +291,7 @@ if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
     echo json_encode([
         'enabled' => $enabled,
+        'cron' => cronState(),
         'alias' => $aliasName,
         'in_alias' => count($current),
         'alias_entries' => $current,
@@ -225,6 +299,10 @@ if ($mode === 'status') {
     ]);
     exit(0);
 }
+
+/* ---- make sure the cron entry matches the plugin state ------------------- */
+
+ensureCronJob($backend, $enabled);
 
 /* ---- make sure the alias and rule exist ---------------------------------- */
 
