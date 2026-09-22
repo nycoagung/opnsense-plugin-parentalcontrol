@@ -62,6 +62,12 @@ sys.stderr.write("  %-34s %s  %d bytes\n" % (path.rsplit("/", 1)[-1], want[:12],
 ' "$GH_OWNER" "$GH_REPO" "$GH_REF" "$1" "$2"
 }
 
+hash_of() {
+    [ -f "$1" ] && md5 -q "$1" 2>/dev/null || echo "absent"
+}
+ACTIONS_BEFORE=$(hash_of "$ACTIONS/actions_parentalcontrol.conf")
+MODEL_BEFORE=$(hash_of "$MVC/models/OPNsense/ParentalControl/ParentalControl.xml")
+
 echo "fetching from github api (${GH_OWNER}/${GH_REPO}@${GH_REF}):"
 
 # Stage every file first; swap them in only once all have verified, so a failed
@@ -91,8 +97,18 @@ IFS=$OLDIFS
 chmod 0755 "$SCRIPTS/install.sh"
 echo "files installed"
 
-# configd needs restarting for a new action file AND for a new MVC model/menu
-service configd restart >/dev/null 2>&1 || true
-/usr/local/opnsense/mvc/script/run_migrations.php >/dev/null 2>&1 || true
-echo "configd restarted, migrations run"
+# Only restart configd when the action file actually changed. This script is
+# itself reachable as a configd action ('configctl parentalcontrol install'), and
+# restarting configd from a script configd launched would kill that script
+# mid-run. Likewise only migrate when the model changed.
+if [ "$ACTIONS_BEFORE" != "$(hash_of "$ACTIONS/actions_parentalcontrol.conf")" ]; then
+    service configd restart >/dev/null 2>&1 || true
+    echo "configd action file changed - configd restarted"
+else
+    echo "configd action file unchanged - not restarting"
+fi
+if [ "$MODEL_BEFORE" != "$(hash_of "$MVC/models/OPNsense/ParentalControl/ParentalControl.xml")" ]; then
+    /usr/local/opnsense/mvc/script/run_migrations.php >/dev/null 2>&1 || true
+    echo "model changed - migrations run"
+fi
 echo "done - reload the GUI, then see Firewall > Parental Control"
