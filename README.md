@@ -18,8 +18,16 @@ slowly, and arbitrary per-device schedules would need one rule per distinct
 schedule. One alias and one rule stays comprehensible at any number of devices.
 
 Both aliases and the rule are created automatically on first apply and are
-idempotent. The rule is identified by its description, so it is never duplicated
-and your existing rules are never touched. An empty alias means the rule matches
+idempotent. The plugin recognises its own objects by a description marker rather
+than by name, so your existing rules are never touched and nothing is duplicated.
+
+**Renaming the alias is safe.** Because the marker is name-independent, changing
+`Alias name` renames the existing aliases in place and repoints the rule at them,
+rather than creating a second pair and leaving the first enforcing invisibly. The
+old pf table is flushed on the way through, so a device that happened to be
+blocked at the moment of the rename does not stay blocked by a table nothing
+maintains any more. Renaming an alias by hand in Firewall → Aliases is picked up
+the same way on the next sync. An empty alias means the rule matches
 nothing, so the plugin is inert until you add a device.
 
 ## Addressing a device
