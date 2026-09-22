@@ -4,12 +4,6 @@
 
 <script>
     $(document).ready(function () {
-        var reconfigure = function (done) {
-            ajaxCall("/api/parentalcontrol/service/reconfigure", {}, function () {
-                if (done !== undefined) { done(); }
-            });
-        };
-
         $("#grid-devices").UIBootgrid({
             search: '/api/parentalcontrol/settings/searchDevice',
             get: '/api/parentalcontrol/settings/getDevice/',
@@ -29,7 +23,6 @@
                     }
                 }
             },
-            onAction: function () { reconfigure(); }
         });
 
         /*
@@ -87,6 +80,10 @@
             loadAddressChoices();
             var $addr = $('#device\\.address');
             $addr.attr('list', 'pc-address-list').attr('autocomplete', 'off');
+            /* base_form has no native time type, so promote these to HTML5 time
+               inputs after render. Their value format is HH:MM, which is exactly
+               what the model already validates, so nothing else changes. */
+            $('#device\\.allow_from, #device\\.allow_to').attr('type', 'time').attr('step', '60');
             $addr.off('change.pcfill').on('change.pcfill', function () {
                 /* fill an empty name from the chosen entry, never overwrite one */
                 var $name = $('#device\\.name');
@@ -105,9 +102,10 @@
 
         $("#saveAct").click(function () {
             saveFormToEndpoint("/api/parentalcontrol/settings/set", 'frm_general', function () {
-                reconfigure(function () {
-                    $("#responseMsg").removeClass("hidden").html("{{ lang._('Applied.') }}");
-                    loadStatus();
+                /* applying is the Apply button's job - it owns the standard
+                   "changes have been applied" message and its placement */
+                $("#change_message_base_form").slideDown(1000, function () {
+                    setTimeout(function () { $("#change_message_base_form").slideUp(2000); }, 2000);
                 });
             }, true);
         });
@@ -152,7 +150,7 @@
 <div class="tab-content content-box">
     <div id="devices" class="tab-pane fade in active">
         <table id="grid-devices" class="table table-condensed table-hover table-striped"
-               data-editDialog="DialogDevice" data-editAlert="deviceChangeMessage">
+               data-editDialog="DialogDevice" data-editAlert="change_message_base_form">
             <thead>
                 <tr>
                     <th data-column-id="uuid" data-type="string" data-identifier="true" data-visible="false">{{ lang._('ID') }}</th>
@@ -173,11 +171,6 @@
                 </tr>
             </tfoot>
         </table>
-        <div class="col-md-12">
-            <div id="deviceChangeMessage" class="alert alert-info" style="display: none" role="alert">
-                {{ lang._('After changing settings, please remember to apply them with the button below') }}
-            </div>
-        </div>
     </div>
 
     <div id="status" class="tab-pane fade in">
@@ -200,21 +193,16 @@
 
     <div id="settings" class="tab-pane fade in">
         {{ partial("layout_partials/base_form", ['fields': generalForm, 'id': 'frm_general']) }}
+        <div class="col-md-12">
+            <hr/>
+            <button class="btn btn-primary" id="saveAct" type="button">
+                <b>{{ lang._('Save') }}</b>
+                <i id="saveAct_progress" class=""></i>
+            </button>
+        </div>
     </div>
 </div>
 
-<section class="page-content-main">
-    <div class="content-box">
-        <div class="col-md-12">
-            <br/>
-            <button class="btn btn-primary" id="saveAct" type="button">
-                <b>{{ lang._('Save and apply') }}</b>
-                <i id="saveAct_progress" class=""></i>
-            </button>
-            <br/><br/>
-            <div id="responseMsg" class="alert alert-info hidden" role="alert"></div>
-        </div>
-    </div>
-</section>
+{{ partial("layout_partials/base_apply_button", {'data_endpoint': '/api/parentalcontrol/service/reconfigure'}) }}
 
 {{ partial("layout_partials/base_dialog",['fields': deviceForm, 'id':'DialogDevice', 'label':lang._('Edit device')]) }}

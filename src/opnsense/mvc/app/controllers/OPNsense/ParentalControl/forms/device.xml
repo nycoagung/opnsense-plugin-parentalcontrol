@@ -34,13 +34,13 @@
         <id>device.allow_from</id>
         <label>Internet allowed from</label>
         <type>text</type>
-        <help>24-hour HH:MM. A window where "from" is later than "to" crosses midnight.</help>
+        <help>The time internet becomes available. A window whose start is later than its end crosses midnight, so 21:00 to 07:00 means overnight.</help>
     </field>
     <field>
         <id>device.allow_to</id>
         <label>Internet allowed until</label>
         <type>text</type>
-        <help>24-hour HH:MM.</help>
+        <help>The time internet stops being available.</help>
     </field>
     <field>
         <id>device.override</id>
