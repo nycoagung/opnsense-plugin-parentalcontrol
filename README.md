@@ -84,9 +84,18 @@ Run once on the firewall as root:
 
     fetch -o - https://raw.githubusercontent.com/nycoagung/opnsense-plugin-parentalcontrol/main/install.sh | sh
 
-Files are pulled from the GitHub API and verified against the git blob SHA the
-API reports; raw.githubusercontent is CDN-cached and can silently serve stale
-content while reporting success.
+One call to the GitHub API returns the tree — every path with its git blob SHA.
+The files themselves come from raw.githubusercontent, which is not rate limited,
+and each is verified against the SHA from that manifest.
+
+That matters twice. Fetching per-file from the API costs one rate-limited
+request per file (60/hour per IP unauthenticated), which a handful of installs
+exhausts. And raw is CDN-cached, lags pushes by minutes, and is cached per edge,
+so it can serve stale content — which the SHA check catches instead of
+installing it silently. A mismatch is retried, then falls back to the API for
+that one file, then gives up loudly.
+
+Set `GITHUB_TOKEN` to raise the API limit if you ever need to.
 
 Then reload the GUI and open **Firewall → Parental Control**.
 

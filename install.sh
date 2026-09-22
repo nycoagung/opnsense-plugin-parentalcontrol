@@ -4,10 +4,21 @@
 # Run once on the firewall as root:
 #   fetch -o - https://raw.githubusercontent.com/nycoagung/opnsense-plugin-parentalcontrol/main/install.sh | sh
 #
-# Files are pulled from the GitHub API, not raw.githubusercontent, and each is
-# verified against the git blob SHA the API reports. raw is CDN-cached, lags
-# pushes by minutes and is cached per edge, so it can silently serve stale
-# content while reporting success.
+# Afterwards:  configctl parentalcontrol install
+#
+# HOW FILES ARE FETCHED AND WHY:
+# One call to the GitHub API returns the tree - every path with its git blob SHA.
+# The files themselves then come from raw.githubusercontent, which is not rate
+# limited, and each one is verified against the SHA from that manifest.
+#
+# This matters twice over. Fetching per-file from the API costs one rate-limited
+# request per file (60/hour unauthenticated), which a handful of installs
+# exhausts. And raw is CDN-cached, lags pushes by minutes and is cached per edge,
+# so it can serve stale content - which the SHA check now catches instead of
+# installing silently. A mismatch is retried, then falls back to the API for
+# that one file, and only then gives up.
+#
+# Set GITHUB_TOKEN to raise the API limit if you ever need to.
 set -e
 
 GH_OWNER="${GH_OWNER:-nycoagung}"
@@ -22,92 +33,124 @@ ACTIONS=/usr/local/opnsense/service/conf/actions.d
 command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
 [ -d "$MVC" ] || { echo "not an OPNsense system: $MVC missing" >&2; exit 1; }
 
-# Every file: <repo path>|<destination>
+M="$MVC/models/OPNsense/ParentalControl"
+C="$MVC/controllers/OPNsense/ParentalControl"
+V="$MVC/views/OPNsense/ParentalControl"
+S=src/opnsense
+
 FILES="
-src/opnsense/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$MVC/models/OPNsense/ParentalControl/ParentalControl.xml
-src/opnsense/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$MVC/models/OPNsense/ParentalControl/ParentalControl.php
-src/opnsense/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$MVC/models/OPNsense/ParentalControl/Menu/Menu.xml
-src/opnsense/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$MVC/models/OPNsense/ParentalControl/ACL/ACL.xml
-src/opnsense/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$MVC/controllers/OPNsense/ParentalControl/IndexController.php
-src/opnsense/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$MVC/controllers/OPNsense/ParentalControl/Api/SettingsController.php
-src/opnsense/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$MVC/controllers/OPNsense/ParentalControl/Api/ServiceController.php
-src/opnsense/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$MVC/controllers/OPNsense/ParentalControl/forms/device.xml
-src/opnsense/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$MVC/controllers/OPNsense/ParentalControl/forms/general.xml
-src/opnsense/mvc/app/views/OPNsense/ParentalControl/index.volt|$MVC/views/OPNsense/ParentalControl/index.volt
-src/opnsense/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
-src/opnsense/service/conf/actions.d/actions_parentalcontrol.conf|$ACTIONS/actions_parentalcontrol.conf
-src/opnsense/www/js/widgets/ParentalControl.js|$WWW/ParentalControl.js
-src/opnsense/www/js/widgets/Metadata/ParentalControl.xml|$WWW/Metadata/ParentalControl.xml
+$S/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalControl.xml
+$S/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
+$S/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$M/Menu/Menu.xml
+$S/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$M/ACL/ACL.xml
+$S/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$C/IndexController.php
+$S/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$C/Api/SettingsController.php
+$S/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$C/Api/ServiceController.php
+$S/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$C/forms/device.xml
+$S/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/general.xml
+$S/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
+$S/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
+$S/service/conf/actions.d/actions_parentalcontrol.conf|$ACTIONS/actions_parentalcontrol.conf
+$S/www/js/widgets/ParentalControl.js|$WWW/ParentalControl.js
+$S/www/js/widgets/Metadata/ParentalControl.xml|$WWW/Metadata/ParentalControl.xml
 install.sh|$SCRIPTS/install.sh
 "
 
-fetch_verified() {
-    python3 -c '
-import base64, hashlib, json, sys, urllib.request
-owner, repo, ref, path, dest = sys.argv[1:6]
-url = "https://api.github.com/repos/%s/%s/contents/%s?ref=%s" % (owner, repo, path, ref)
-req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
-                                           "User-Agent": "parentalcontrol-installer"})
-with urllib.request.urlopen(req, timeout=60) as r:
-    meta = json.load(r)
-data = base64.b64decode(meta["content"])
-want = meta["sha"]
-got = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
-if got != want:
-    sys.stderr.write("SHA MISMATCH %s\n  expected %s\n  got      %s\n" % (path, want, got))
-    sys.exit(1)
-with open(dest, "wb") as f:
-    f.write(data)
-sys.stderr.write("  %-34s %s  %d bytes\n" % (path.rsplit("/", 1)[-1], want[:12], len(data)))
-' "$GH_OWNER" "$GH_REPO" "$GH_REF" "$1" "$2"
-}
-
-hash_of() {
-    [ -f "$1" ] && md5 -q "$1" 2>/dev/null || echo "absent"
-}
+hash_of() { [ -f "$1" ] && md5 -q "$1" 2>/dev/null || echo absent; }
 ACTIONS_BEFORE=$(hash_of "$ACTIONS/actions_parentalcontrol.conf")
-MODEL_BEFORE=$(hash_of "$MVC/models/OPNsense/ParentalControl/ParentalControl.xml")
+MODEL_BEFORE=$(hash_of "$M/ParentalControl.xml")
 
-echo "fetching from github api (${GH_OWNER}/${GH_REPO}@${GH_REF}):"
-
-# Stage every file first; swap them in only once all have verified, so a failed
-# or stale download can never leave a half-installed plugin behind.
-# Deliberately NOT `echo "$FILES" | while read`: a pipeline runs its loop in a
-# subshell, where `set -e` cannot abort the script. A failed verification would
-# print its error and the install would carry on to the swap regardless, which
-# is exactly the silent-stale-install this script exists to prevent.
-OLDIFS=$IFS
-IFS='
-'
+ARGS=""
 for entry in $FILES; do
     [ -n "$entry" ] || continue
-    src=${entry%%|*}
-    dst=${entry#*|}
-    mkdir -p "$(dirname "$dst")"
-    fetch_verified "$src" "$dst.pcnew"
+    mkdir -p "$(dirname "${entry#*|}")"
+    ARGS="$ARGS $entry"
 done
 
+# One process, one manifest request, all files verified before anything is swapped.
+python3 -c '
+import base64, hashlib, json, os, sys, urllib.request, urllib.error
+
+owner, repo, ref = sys.argv[1:4]
+pairs = [a.split("|", 1) for a in sys.argv[4:]]
+tok = os.environ.get("GITHUB_TOKEN", "").strip()
+hdr = {"Accept": "application/vnd.github+json", "User-Agent": "parentalcontrol-installer"}
+if tok:
+    hdr["Authorization"] = "Bearer " + tok
+
+def api(url):
+    try:
+        return json.load(urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=60))
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            sys.stderr.write(
+                "GitHub API rate limit reached (60/hour per IP unauthenticated).\n"
+                "This installer needs exactly ONE API request; wait a few minutes,\n"
+                "or set GITHUB_TOKEN to raise the limit.\n")
+        raise
+
+tree = api("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1" % (owner, repo, ref))
+shas = {t["path"]: t["sha"] for t in tree.get("tree", []) if t.get("type") == "blob"}
+
+def blob_sha(data):
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+def raw(path):
+    url = "https://raw.githubusercontent.com/%s/%s/%s/%s" % (owner, repo, ref, path)
+    req = urllib.request.Request(url, headers={"User-Agent": "parentalcontrol-installer",
+                                               "Cache-Control": "no-cache"})
+    return urllib.request.urlopen(req, timeout=60).read()
+
+fail = False
+for src, dst in pairs:
+    want = shas.get(src)
+    if want is None:
+        sys.stderr.write("  %-34s NOT IN REPO\n" % src.rsplit("/", 1)[-1]); fail = True; continue
+    data, how = None, ""
+    for attempt in (1, 2):
+        try:
+            d = raw(src)
+        except Exception:
+            d = None
+        if d is not None and blob_sha(d) == want:
+            data, how = d, "raw" if attempt == 1 else "raw/retry"
+            break
+    if data is None:
+        # raw is serving stale or unreachable content - fall back to the API for
+        # this one file only, so a bad edge costs one request, not fifteen
+        meta = api("https://api.github.com/repos/%s/%s/contents/%s?ref=%s" % (owner, repo, src, ref))
+        d = base64.b64decode(meta["content"])
+        if blob_sha(d) == want:
+            data, how = d, "api"
+    if data is None:
+        sys.stderr.write("  %-34s SHA MISMATCH - refusing\n" % src.rsplit("/", 1)[-1]); fail = True; continue
+    with open(dst + ".pcnew", "wb") as f:
+        f.write(data)
+    sys.stderr.write("  %-34s %s  %6d bytes  via %s\n" % (src.rsplit("/", 1)[-1], want[:12], len(data), how))
+
+sys.exit(1 if fail else 0)
+' "$GH_OWNER" "$GH_REPO" "$GH_REF" $ARGS
+
+# Nothing is swapped until every file above verified.
 for entry in $FILES; do
     [ -n "$entry" ] || continue
     dst=${entry#*|}
     mv "$dst.pcnew" "$dst"
     case "$dst" in *.php) chmod 0755 "$dst" ;; *) chmod 0644 "$dst" ;; esac
 done
-IFS=$OLDIFS
 chmod 0755 "$SCRIPTS/install.sh"
 echo "files installed"
 
-# Only restart configd when the action file actually changed. This script is
-# itself reachable as a configd action ('configctl parentalcontrol install'), and
-# restarting configd from a script configd launched would kill that script
-# mid-run. Likewise only migrate when the model changed.
+# This script is reachable as 'configctl parentalcontrol install', and restarting
+# configd from a script configd launched would kill it mid-run - so only restart
+# when the action file actually changed.
 if [ "$ACTIONS_BEFORE" != "$(hash_of "$ACTIONS/actions_parentalcontrol.conf")" ]; then
     service configd restart >/dev/null 2>&1 || true
     echo "configd action file changed - configd restarted"
 else
     echo "configd action file unchanged - not restarting"
 fi
-if [ "$MODEL_BEFORE" != "$(hash_of "$MVC/models/OPNsense/ParentalControl/ParentalControl.xml")" ]; then
+if [ "$MODEL_BEFORE" != "$(hash_of "$M/ParentalControl.xml")" ]; then
     /usr/local/opnsense/mvc/script/run_migrations.php >/dev/null 2>&1 || true
     echo "model changed - migrations run"
 fi
