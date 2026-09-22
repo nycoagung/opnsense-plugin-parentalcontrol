@@ -1,18 +1,18 @@
 <form>
     <field>
-        <id>general.enabled</id>
+        <id>parentalcontrol.general.enabled</id>
         <label>Enable</label>
         <type>checkbox</type>
         <help>Enforce parental control. When disabled the alias is emptied, so no device is blocked.</help>
     </field>
     <field>
-        <id>general.alias_name</id>
+        <id>parentalcontrol.general.alias_name</id>
         <label>Alias name</label>
         <type>text</type>
         <help>The firewall alias holding currently blocked devices. Created automatically if missing, along with the rule that blocks it from reaching the internet.</help>
     </field>
     <field>
-        <id>general.kill_states</id>
+        <id>parentalcontrol.general.kill_states</id>
         <label>Drop existing connections</label>
         <type>checkbox</type>
         <help>When a device becomes blocked, drop its established connections. Without this an in-progress stream keeps running until it ends by itself.</help>
