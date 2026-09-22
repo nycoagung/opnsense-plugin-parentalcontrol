@@ -82,20 +82,23 @@ name is configurable.
 
 Run once on the firewall as root:
 
-    fetch -o - https://raw.githubusercontent.com/nycoagung/opnsense-plugin-parentalcontrol/main/install.sh | sh
+    fetch -qo /tmp/pc.tgz https://codeload.github.com/nycoagung/opnsense-plugin-parentalcontrol/tar.gz/refs/heads/main && \
+      rm -rf /tmp/pcx && mkdir -p /tmp/pcx && tar -xzf /tmp/pc.tgz -C /tmp/pcx && \
+      sh /tmp/pcx/opnsense-plugin-parentalcontrol-main/install.sh
 
-One call to the GitHub API returns the tree — every path with its git blob SHA.
-The files themselves come from raw.githubusercontent, which is not rate limited,
-and each is verified against the SHA from that manifest.
+Sources come from **codeload**, which serves the git ref directly: one request
+for the whole tree, no rate limit, and current. The two obvious alternatives
+both fail here:
 
-That matters twice. Fetching per-file from the API costs one rate-limited
-request per file (60/hour per IP unauthenticated), which a handful of installs
-exhausts. And raw is CDN-cached, lags pushes by minutes, and is cached per edge,
-so it can serve stale content — which the SHA check catches instead of
-installing it silently. A mismatch is retried, then falls back to the API for
-that one file, then gives up loudly.
+- the **GitHub API** costs one rate-limited request per file (60/hour per IP,
+  and it is the firewall's own public IP that counts) — fifteen files exhausted
+  it after four installs
+- **raw.githubusercontent** is CDN-cached, lags pushes by minutes and is cached
+  per edge, so it silently serves stale content. Measured: raw was serving a
+  five-commit-old installer at the moment codeload matched the repo byte for byte
 
-Set `GITHUB_TOKEN` to raise the API limit if you ever need to.
+Running the script from an already-extracted archive installs from there instead
+of downloading again, so the bootstrap above costs exactly one fetch.
 
 Then reload the GUI and open **Firewall → Parental Control**.
 
