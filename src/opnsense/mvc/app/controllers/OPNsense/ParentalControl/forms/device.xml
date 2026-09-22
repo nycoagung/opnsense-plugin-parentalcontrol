@@ -15,7 +15,7 @@
         <id>device.address</id>
         <label>Address</label>
         <type>text</type>
-        <help>IPv4 address or CIDR, e.g. 192.168.1.50 or 192.168.1.0/24. Give the device a static lease first, or its address will change and the rule will follow the wrong device.</help>
+        <help>An IPv4 address or CIDR (192.168.1.50, 192.168.1.0/24), or a MAC address (aa:bb:cc:dd:ee:ff). A MAC is resolved to the address the device currently holds, so it only works while the device is visible to the firewall and it cannot follow a randomised MAC. An address with a static DHCP reservation is the more reliable choice.</help>
     </field>
     <field>
         <id>device.mode</id>

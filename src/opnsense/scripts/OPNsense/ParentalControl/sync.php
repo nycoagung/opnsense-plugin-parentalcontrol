@@ -91,6 +91,62 @@ function resolveDevice($dev, $enabled)
         : [true, 'outside allowed hours'];
 }
 
+function isMac($v)
+{
+    return (bool)preg_match('/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/', trim($v));
+}
+
+/**
+ * MAC -> current IPv4 address(es).
+ *
+ * pf has no layer-2 matching, so a MAC can only ever be resolved to an address
+ * and filtered on that. A device the firewall has not seen cannot be resolved -
+ * it is also not using the internet at that moment, so nothing escapes, but the
+ * status output says so rather than pretending the device is covered.
+ *
+ * ARP is the live truth and is tried first; DHCP leases cover a device that is
+ * powered on but has aged out of the ARP cache.
+ */
+function macToAddresses($mac)
+{
+    static $arp = null;
+    static $leases = null;
+    $mac = strtolower(trim($mac));
+
+    if ($arp === null) {
+        $arp = [];
+        $out = [];
+        @exec('/usr/sbin/arp -an 2>/dev/null', $out);
+        foreach ($out as $line) {
+            /* ? (192.168.1.5) at 9c:e6:5e:d0:0d:41 on ue0 expires in 1200 seconds */
+            if (preg_match('/\(([0-9.]+)\) at ([0-9a-fA-F:]{17})/', $line, $m)) {
+                $arp[strtolower($m[2])][] = $m[1];
+            }
+        }
+    }
+    if (isset($arp[$mac])) {
+        return array_values(array_unique($arp[$mac]));
+    }
+
+    if ($leases === null) {
+        $leases = [];
+        foreach (['/var/db/dnsmasq.leases', '/var/dhcpd/var/db/dhcpd.leases'] as $path) {
+            if (!is_readable($path)) {
+                continue;
+            }
+            foreach (@file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+                /* dnsmasq: <expiry> <mac> <ip> <hostname> <clientid> */
+                $parts = preg_split('/\s+/', trim($line));
+                if (count($parts) >= 3 && preg_match('/^[0-9a-fA-F:]{17}$/', $parts[1])
+                    && filter_var($parts[2], FILTER_VALIDATE_IP)) {
+                    $leases[strtolower($parts[1])][] = $parts[2];
+                }
+            }
+        }
+    }
+    return isset($leases[$mac]) ? array_values(array_unique($leases[$mac])) : [];
+}
+
 function timeToMinutes($v)
 {
     if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $v, $m)) {
@@ -106,18 +162,36 @@ $blockSet = [];
 foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
     list($blocked, $reason) = resolveDevice($dev, $enabled);
     $addr = trim((string)$dev->address);
+
+    /* a MAC is an identity, not something pf can match - resolve it to whatever
+       address the device is using right now */
+    if (isMac($addr)) {
+        $targets = macToAddresses($addr);
+        $resolved = empty($targets) ? '' : implode(', ', $targets);
+        if (empty($targets) && $blocked) {
+            $reason .= ' (MAC not currently resolvable)';
+        }
+    } else {
+        $targets = $addr === '' ? [] : [$addr];
+        $resolved = $addr;
+    }
+
     $devices[] = [
         'uuid' => $uuid,
         'name' => (string)$dev->name,
         'address' => $addr,
+        'is_mac' => isMac($addr),
+        'resolved' => $resolved,
         'mode' => (string)$dev->mode,
         'override' => (string)$dev->override,
         'enabled' => (string)$dev->enabled,
         'blocked' => $blocked,
         'reason' => $reason,
     ];
-    if ($blocked && $addr !== '') {
-        $blockSet[$addr] = true;
+    if ($blocked) {
+        foreach ($targets as $t) {
+            $blockSet[$t] = true;
+        }
     }
 }
 

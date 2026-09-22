@@ -56,8 +56,16 @@
                     var badge = d.blocked
                         ? '<span class="label label-danger">{{ lang._("blocked") }}</span>'
                         : '<span class="label label-success">{{ lang._("allowed") }}</span>';
+                    // a MAC only means something once resolved, so show what it
+                    // actually matched rather than just the configured value
+                    var addr = $('<div>').text(d.address).html();
+                    if (d.is_mac) {
+                        addr += d.resolved
+                            ? '<br/><small class="text-muted">&rarr; ' + $('<div>').text(d.resolved).html() + '</small>'
+                            : '<br/><small class="text-danger">{{ lang._("not resolvable right now") }}</small>';
+                    }
                     return '<tr><td>' + $('<div>').text(d.name).html() + '</td>' +
-                           '<td>' + $('<div>').text(d.address).html() + '</td>' +
+                           '<td>' + addr + '</td>' +
                            '<td>' + $('<div>').text(d.reason).html() + '</td>' +
                            '<td>' + badge + '</td></tr>';
                 }).join('');

@@ -31,8 +31,8 @@
             </name>
             <address type="TextField">
                 <Required>Y</Required>
-                <Mask>/^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(\/(3[0-2]|[12]?\d))?$/</Mask>
-                <ValidationMessage>An IPv4 address or CIDR, e.g. 192.168.1.50 or 192.168.1.0/24.</ValidationMessage>
+                <Mask>/^(((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(\/(3[0-2]|[12]?\d))?|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})$/</Mask>
+                <ValidationMessage>An IPv4 address or CIDR (192.168.1.50, 192.168.1.0/24) or a MAC address (aa:bb:cc:dd:ee:ff).</ValidationMessage>
             </address>
             <mode type="OptionField">
                 <Required>Y</Required>
