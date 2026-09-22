@@ -205,7 +205,11 @@ function ensureCronJob($backend, $enabled)
     }
     $cron->serializeToConfig();
     Config::getInstance()->save();
-    $backend->configdRun('cron reconfigure');
+    /* 'cron restart' is what regenerates the crontab - core's own cron
+       ServiceController calls exactly this. 'cron reconfigure' is not a
+       registered action: it returns quietly and the crontab is never written,
+       so the job sits in the config looking correct while never running. */
+    $backend->configdRun('cron restart');
     return true;
 }
 
