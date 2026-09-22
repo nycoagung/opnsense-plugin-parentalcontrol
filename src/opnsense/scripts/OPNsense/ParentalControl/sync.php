@@ -32,6 +32,16 @@ use OPNsense\ParentalControl\ParentalControl;
    assumption about this particular network, so it stays correct anywhere. */
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
+/* The plugin finds its own alias and rule by these description prefixes rather
+   than by name. Names are user-editable, so matching on them means a rename
+   silently orphans the old objects - leaving whatever was blocked blocked
+   forever, with nothing in the UI explaining why. Prefixes are used so an
+   existing install whose rule description still embeds the old alias name is
+   still recognised. */
+const MARK_BLOCK = 'Parental Control: devices currently denied internet';
+const MARK_LOCAL = 'Parental Control: local networks';
+const MARK_RULE  = 'Parental Control: block internet';
+
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
    which would shift every window by the UTC offset while the UI agreed with
    itself. Take the timezone from the firewall's own configuration. */
@@ -395,32 +405,46 @@ ensureCronJob($backend, $enabled);
 $cfgChanged = false;
 $aliasMdl = new Alias();
 
-$haveBlock = false;
-$haveLocal = false;
+/* find our own objects by marker, whatever they are currently called */
+$blockNode = null;
+$localNode = null;
 foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
-    $n = (string)$item->name;
-    if ($n === $aliasName) {
-        $haveBlock = true;
-    } elseif ($n === $localAlias) {
-        $haveLocal = true;
+    $d = (string)$item->description;
+    if (strpos($d, MARK_BLOCK) === 0) {
+        $blockNode = $item;
+    } elseif (strpos($d, MARK_LOCAL) === 0) {
+        $localNode = $item;
     }
 }
 
-if (!$haveBlock) {
-    $node = $aliasMdl->aliases->alias->Add();
-    $node->name = $aliasName;
-    $node->type = 'external';               /* contents managed here, not in config */
-    $node->enabled = '1';
-    $node->description = 'Parental Control: devices currently denied internet';
+/* A renamed external alias means a renamed pf table, so the old one keeps its
+   entries and nothing references it any more. Remember it and flush it below,
+   or every address blocked at the moment of the rename stays blocked. */
+$staleTable = null;
+
+if ($blockNode === null) {
+    $blockNode = $aliasMdl->aliases->alias->Add();
+    $blockNode->name = $aliasName;
+    $blockNode->type = 'external';          /* contents managed here, not in config */
+    $blockNode->enabled = '1';
+    $blockNode->description = MARK_BLOCK;
+    $cfgChanged = true;
+} elseif ((string)$blockNode->name !== $aliasName) {
+    $staleTable = (string)$blockNode->name;
+    $blockNode->name = $aliasName;
     $cfgChanged = true;
 }
-if (!$haveLocal) {
-    $node = $aliasMdl->aliases->alias->Add();
-    $node->name = $localAlias;
-    $node->type = 'network';
-    $node->enabled = '1';
-    $node->content = implode("\n", LOCAL_NETS);
-    $node->description = 'Parental Control: local networks (block destination is NOT this)';
+
+if ($localNode === null) {
+    $localNode = $aliasMdl->aliases->alias->Add();
+    $localNode->name = $localAlias;
+    $localNode->type = 'network';
+    $localNode->enabled = '1';
+    $localNode->content = implode("\n", LOCAL_NETS);
+    $localNode->description = MARK_LOCAL . ' (block destination is NOT this)';
+    $cfgChanged = true;
+} elseif ((string)$localNode->name !== $localAlias) {
+    $localNode->name = $localAlias;
     $cfgChanged = true;
 }
 if ($cfgChanged) {
@@ -441,26 +465,45 @@ if ($cfgChanged) {
 /* one floating block rule: source in the alias, destination NOT local.
    No interface is set, so it covers every interface including ones added
    later - nothing about this installation is assumed. */
-$ruleDescr = 'Parental Control: block internet for ' . $aliasName;
+$ruleDescr = MARK_RULE . ' for ' . $aliasName;
 $filterMdl = new Filter();
-$haveRule = false;
+$ruleNode = null;
 foreach ($filterMdl->rules->rule->iterateItems() as $rule) {
-    if ((string)$rule->description === $ruleDescr) {
-        $haveRule = true;
+    if (strpos((string)$rule->description, MARK_RULE) === 0) {
+        $ruleNode = $rule;
         break;
     }
 }
-if (!$haveRule) {
-    $rule = $filterMdl->rules->rule->Add();
-    $rule->enabled = '1';
-    $rule->action = 'block';
-    $rule->quick = '1';
-    $rule->direction = 'in';
-    $rule->ipprotocol = 'inet';
-    $rule->source_net = $aliasName;
-    $rule->destination_net = $localAlias;
-    $rule->destination_not = '1';
-    $rule->description = $ruleDescr;
+$ruleChanged = false;
+if ($ruleNode !== null) {
+    /* follow a rename: repoint the rule at the current alias names rather than
+       leaving it enforcing against the old pair */
+    if ((string)$ruleNode->source_net !== $aliasName) {
+        $ruleNode->source_net = $aliasName;
+        $ruleChanged = true;
+    }
+    if ((string)$ruleNode->destination_net !== $localAlias) {
+        $ruleNode->destination_net = $localAlias;
+        $ruleChanged = true;
+    }
+    if ((string)$ruleNode->description !== $ruleDescr) {
+        $ruleNode->description = $ruleDescr;
+        $ruleChanged = true;
+    }
+}
+if ($ruleNode === null || $ruleChanged) {
+    if ($ruleNode === null) {
+        $rule = $filterMdl->rules->rule->Add();
+        $rule->enabled = '1';
+        $rule->action = 'block';
+        $rule->quick = '1';
+        $rule->direction = 'in';
+        $rule->ipprotocol = 'inet';
+        $rule->source_net = $aliasName;
+        $rule->destination_net = $localAlias;
+        $rule->destination_not = '1';
+        $rule->description = $ruleDescr;
+    }
     $val = $filterMdl->performValidation();
     if ($val->count() == 0) {
         $filterMdl->serializeToConfig();
@@ -475,6 +518,14 @@ if (!$haveRule) {
 }
 if ($cfgChanged) {
     $backend->configdRun('filter reload');
+}
+
+/* The renamed-away table is no longer referenced by any rule, but its entries
+   survive in pf until something clears them. Flush it so a device blocked at
+   the moment of the rename is not left blocked by a table nobody maintains. */
+if ($staleTable !== null) {
+    $backend->configdpRun('filter delete table', [$staleTable, 'ALL']);
+    fwrite(STDERR, "alias renamed $staleTable -> $aliasName; flushed the old table\n");
 }
 
 /* ---- sync the table ------------------------------------------------------ */
