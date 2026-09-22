@@ -128,10 +128,16 @@ export default class ParentalControl extends BaseWidget {
                         data-uuid="${this._esc(d.uuid)}" title="Clear override, follow the schedule">
                         <i class="fa fa-clock-o fa-fw"></i></button>`
                     : '';
+                // for a MAC, the configured value is an identity and the resolved
+                // address is what is actually enforced - show the latter
+                const shown = d.is_mac
+                    ? (d.resolved || 'unresolved')
+                    : d.address;
+                const cls = (d.is_mac && !d.resolved) ? 'text-danger' : 'text-muted';
                 return `<tr>
                     <td style="text-align:left;${clip}" title="${this._esc(d.address)}">
                         <strong>${this._esc(d.name)}</strong><br/>
-                        <small class="text-muted">${this._esc(d.address)}</small></td>
+                        <small class="${cls}">${this._esc(shown)}</small></td>
                     <td style="text-align:left;${clip}" title="${this._esc(d.reason)}">
                         <small>${this._esc(d.reason)}</small></td>
                     <td style="text-align:right;white-space:nowrap;">${btn}${auto}</td></tr>`;

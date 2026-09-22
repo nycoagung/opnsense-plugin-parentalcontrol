@@ -22,6 +22,26 @@ idempotent. The rule is identified by its description, so it is never duplicated
 and your existing rules are never touched. An empty alias means the rule matches
 nothing, so the plugin is inert until you add a device.
 
+## Addressing a device
+
+The **Address** field takes an IPv4 address, a CIDR, or a MAC address.
+
+A MAC is resolved to whatever address the device currently holds — from ARP
+first, falling back to DHCP leases. This is not layer-2 filtering: pf has no MAC
+matching, so a MAC can only ever be turned into an address and filtered on that.
+The consequences are worth knowing:
+
+- a device the firewall has not seen cannot be resolved, and the status tab says
+  so rather than implying the device is covered (it is also not using the
+  internet at that moment, so nothing escapes)
+- a change of address is only picked up on the next sync
+- a randomised MAC cannot be followed at all
+
+**A static DHCP reservation plus its IP is the more reliable choice**, and is
+already MAC-based identity — the reservation pins that MAC to that address
+permanently, with no resolution step and no lag. Use a MAC when the device has
+no reservation.
+
 ## Schedules
 
 A device is **always allowed**, **always blocked**, or **scheduled**. A schedule
