@@ -1,0 +1,259 @@
+#!/usr/local/bin/php
+<?php
+
+/**
+ * Parental Control enforcement.
+ *
+ *   sync.php           resolve every device and apply the result
+ *   sync.php status    resolve every device and print JSON, changing nothing
+ *
+ * One implementation of the schedule logic, shared by the settings page, the
+ * dashboard widget and the cron run, so none of them can disagree about what
+ * is actually enforced.
+ *
+ * Enforcement is a single externally-managed alias plus a single floating block
+ * rule. Toggling a device is a pf table update, which takes effect immediately
+ * and needs no ruleset reload. Per-device rules were rejected: they do not
+ * scale, they apply slowly, and arbitrary per-device schedules would need one
+ * rule per distinct schedule.
+ */
+
+require_once("config.inc");
+require_once("util.inc");
+
+use OPNsense\Core\Backend;
+use OPNsense\Core\Config;
+use OPNsense\Firewall\Alias;
+use OPNsense\Firewall\Filter;
+use OPNsense\ParentalControl\ParentalControl;
+
+/* Private address space. This is the definition of "not the internet", not an
+   assumption about this particular network, so it stays correct anywhere. */
+const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
+
+$mode = isset($argv[1]) ? $argv[1] : 'sync';
+$mdl = new ParentalControl();
+$backend = new Backend();
+
+$aliasName = trim((string)$mdl->general->alias_name);
+if ($aliasName === '') {
+    $aliasName = 'NoInternet';
+}
+$localAlias = $aliasName . '_Local';
+$enabled = (string)$mdl->general->enabled === '1';
+
+/**
+ * Resolve one device to blocked/allowed plus a human reason.
+ */
+function resolveDevice($dev, $enabled)
+{
+    if (!$enabled) {
+        return [false, 'plugin disabled'];
+    }
+    if ((string)$dev->enabled !== '1') {
+        return [false, 'device disabled'];
+    }
+    $override = (string)$dev->override;
+    if ($override === 'allow') {
+        return [false, 'override: allow'];
+    }
+    if ($override === 'block') {
+        return [true, 'override: block'];
+    }
+    $mode = (string)$dev->mode;
+    if ($mode === 'allow') {
+        return [false, 'always allowed'];
+    }
+    if ($mode === 'block') {
+        return [true, 'always blocked'];
+    }
+
+    /* scheduled: allowed inside the window on a selected day, blocked otherwise */
+    $days = array_filter(explode(',', (string)$dev->weekdays));
+    $today = strtolower(date('D'));                 /* mon, tue, ... */
+    if (!in_array($today, $days, true)) {
+        return [true, 'outside scheduled days'];
+    }
+    $now = (int)date('H') * 60 + (int)date('i');
+    $from = timeToMinutes((string)$dev->allow_from);
+    $to = timeToMinutes((string)$dev->allow_to);
+    if ($from === null || $to === null) {
+        return [false, 'no valid window'];
+    }
+    if ($from == $to) {
+        return [false, 'window covers the whole day'];
+    }
+    $inWindow = ($from < $to)
+        ? ($now >= $from && $now < $to)
+        : ($now >= $from || $now < $to);          /* window crosses midnight */
+    return $inWindow
+        ? [false, 'within allowed hours']
+        : [true, 'outside allowed hours'];
+}
+
+function timeToMinutes($v)
+{
+    if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $v, $m)) {
+        return null;
+    }
+    return ((int)$m[1]) * 60 + ((int)$m[2]);
+}
+
+/* ---- resolve every device ------------------------------------------------ */
+
+$devices = [];
+$blockSet = [];
+foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
+    list($blocked, $reason) = resolveDevice($dev, $enabled);
+    $addr = trim((string)$dev->address);
+    $devices[] = [
+        'uuid' => $uuid,
+        'name' => (string)$dev->name,
+        'address' => $addr,
+        'mode' => (string)$dev->mode,
+        'override' => (string)$dev->override,
+        'enabled' => (string)$dev->enabled,
+        'blocked' => $blocked,
+        'reason' => $reason,
+    ];
+    if ($blocked && $addr !== '') {
+        $blockSet[$addr] = true;
+    }
+}
+
+/* ---- status: report only ------------------------------------------------- */
+
+function tableContents($backend, $alias)
+{
+    $raw = $backend->configdpRun('filter list table', [$alias]);
+    $rows = json_decode(trim((string)$raw), true);
+    $out = [];
+    if (is_array($rows)) {
+        foreach ($rows as $row) {
+            if (is_array($row) && isset($row['ip'])) {
+                $out[] = $row['ip'];
+            } elseif (is_string($row)) {
+                $out[] = $row;
+            }
+        }
+    }
+    return $out;
+}
+
+if ($mode === 'status') {
+    $current = tableContents($backend, $aliasName);
+    echo json_encode([
+        'enabled' => $enabled,
+        'alias' => $aliasName,
+        'in_alias' => count($current),
+        'alias_entries' => $current,
+        'devices' => $devices,
+    ]);
+    exit(0);
+}
+
+/* ---- make sure the alias and rule exist ---------------------------------- */
+
+$cfgChanged = false;
+$aliasMdl = new Alias();
+
+$haveBlock = false;
+$haveLocal = false;
+foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
+    $n = (string)$item->name;
+    if ($n === $aliasName) {
+        $haveBlock = true;
+    } elseif ($n === $localAlias) {
+        $haveLocal = true;
+    }
+}
+
+if (!$haveBlock) {
+    $node = $aliasMdl->aliases->alias->Add();
+    $node->name = $aliasName;
+    $node->type = 'external';               /* contents managed here, not in config */
+    $node->enabled = '1';
+    $node->description = 'Parental Control: devices currently denied internet';
+    $cfgChanged = true;
+}
+if (!$haveLocal) {
+    $node = $aliasMdl->aliases->alias->Add();
+    $node->name = $localAlias;
+    $node->type = 'network';
+    $node->enabled = '1';
+    $node->content = implode("\n", LOCAL_NETS);
+    $node->description = 'Parental Control: local networks (block destination is NOT this)';
+    $cfgChanged = true;
+}
+if ($cfgChanged) {
+    if ($aliasMdl->performValidation()->count() == 0) {
+        $aliasMdl->serializeToConfig();
+        Config::getInstance()->save();
+    } else {
+        fwrite(STDERR, "alias validation failed\n");
+        exit(1);
+    }
+}
+
+/* one floating block rule: source in the alias, destination NOT local.
+   No interface is set, so it covers every interface including ones added
+   later - nothing about this installation is assumed. */
+$ruleDescr = 'Parental Control: block internet for ' . $aliasName;
+$filterMdl = new Filter();
+$haveRule = false;
+foreach ($filterMdl->rules->rule->iterateItems() as $rule) {
+    if ((string)$rule->description === $ruleDescr) {
+        $haveRule = true;
+        break;
+    }
+}
+if (!$haveRule) {
+    $rule = $filterMdl->rules->rule->Add();
+    $rule->enabled = '1';
+    $rule->action = 'block';
+    $rule->quick = '1';
+    $rule->direction = 'in';
+    $rule->ipprotocol = 'inet';
+    $rule->source_net = $aliasName;
+    $rule->destination_net = $localAlias;
+    $rule->destination_not = '1';
+    $rule->description = $ruleDescr;
+    if ($filterMdl->performValidation()->count() == 0) {
+        $filterMdl->serializeToConfig();
+        Config::getInstance()->save();
+        $cfgChanged = true;
+    } else {
+        fwrite(STDERR, "rule validation failed\n");
+        exit(1);
+    }
+}
+if ($cfgChanged) {
+    $backend->configdRun('filter reload');
+}
+
+/* ---- sync the table ------------------------------------------------------ */
+
+$current = tableContents($backend, $aliasName);
+$want = array_keys($blockSet);
+
+$toAdd = array_diff($want, $current);
+$toDel = array_diff($current, $want);
+
+foreach ($toAdd as $addr) {
+    $backend->configdpRun('filter add table', [$aliasName, $addr]);
+}
+foreach ($toDel as $addr) {
+    $backend->configdpRun('filter delete table', [$aliasName, $addr]);
+}
+
+/* Established connections survive a new block, so a stream already running
+   keeps going until it ends by itself. Dropping their states is what makes
+   "off" mean off. Best effort: never fail the sync over it. */
+if ((string)$mdl->general->kill_states === '1') {
+    foreach ($toAdd as $addr) {
+        $ip = explode('/', $addr)[0];
+        @exec('/sbin/pfctl -k ' . escapeshellarg($ip) . ' 2>&1', $o, $rc);
+    }
+}
+
+printf("blocked=%d added=%d removed=%d\n", count($want), count($toAdd), count($toDel));
