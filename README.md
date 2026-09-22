@@ -112,12 +112,14 @@ Then reload the GUI and open **Firewall → Parental Control**.
 
 ## The two configd actions
 
-    configctl parentalcontrol sync      re-evaluate every device, sync the alias
-    configctl parentalcontrol install   re-fetch the plugin from upstream
+    configctl parentalcontrol sync        re-evaluate every device, sync the alias
+    configctl parentalcontrol install     re-fetch the plugin from upstream
+    configctl parentalcontrol uninstall   remove the aliases, rule and cron job
 
 They are not interchangeable. `sync` applies device states using the code already
 on the firewall; it is the one cron needs. `install` pulls new code and does not
-touch device state.
+touch device state. `uninstall` removes the firewall objects but leaves the files,
+which is the way to stop enforcement without uninstalling — `sync` puts them back.
 
 ## Keeping it installed
 
@@ -149,6 +151,11 @@ aliases they reference, so nothing is left blocked by an object that no longer
 has an owner. Everything is matched by description marker, so a renamed alias is
 still found. Safe to run repeatedly.
 
+This genuinely removes the plugin — the menu entry disappears and the widget
+drops off the dashboard. Note that `configctl parentalcontrol install` will not
+work afterwards, because the action file is one of the things it deletes; use the
+codeload bootstrap under Install to come back.
+
 Device settings stay in `config.xml`, so reinstalling restores them. Add
 `--purge` to remove those as well.
 
@@ -157,6 +164,28 @@ The config-side cleanup is also available on its own as
 leaving the plugin installed. The shell script is deliberately *not* a configd
 action, because it deletes the action file and restarts configd, and a script
 configd launched would be killed partway through that.
+
+## What has been verified, and what has not
+
+Verified by observation against a live firewall, not by reading the code:
+settings save and device CRUD; alias and rule creation, inspected field by
+field; schedule evaluation at several times of day; adding to and removing from
+the pf table; cron driving it unattended (observed acting 31 seconds after a
+config change, with no manual trigger); and renaming the alias in both
+directions, confirming the aliases rename in place, the rule follows, the old pf
+table is flushed, no duplicate pair appears and enforcement never lapses.
+
+The schedule logic has 19 table-driven tests in `tests/ScheduleTest.php`, which
+need no OPNsense and run anywhere PHP does. They were checked against the
+pre-fix logic and fail 4 cases there, so they test something real.
+
+**Not exercised:** the uninstall path. `uninstall.php` and `uninstall.sh` are
+lint-clean and their ordering is deliberate, but neither has been run end to end.
+`configctl parentalcontrol uninstall && configctl parentalcontrol sync` exercises
+all of the config-side logic and repairs itself in the same command, if you want
+to change that cheaply.
+
+**Not implemented:** IPv6 blocking — see Requirements below.
 
 ## Requirements
 
