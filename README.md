@@ -90,12 +90,27 @@ content while reporting success.
 
 Then reload the GUI and open **Firewall → Parental Control**.
 
+## The two configd actions
+
+    configctl parentalcontrol sync      re-evaluate every device, sync the alias
+    configctl parentalcontrol install   re-fetch the plugin from upstream
+
+They are not interchangeable. `sync` applies device states using the code already
+on the firewall; it is the one cron needs. `install` pulls new code and does not
+touch device state.
+
 ## Keeping it installed
 
 These files are not owned by a package, so a firmware upgrade can remove them.
-Add a cron job running *Apply parental control device states* to reinstate them,
-and to re-evaluate schedules — **run it every minute**, since schedule changes
-only take effect when it runs.
+
+- Cron *Apply parental control device states* **every minute** — schedules only
+  change state when this runs, so this one is required, not optional.
+- Cron *Install/refresh Parental Control plugin from upstream* weekly, to
+  reinstate the files after an upgrade removes them.
+
+The installer is safe to run from cron: it only restarts configd when the action
+file actually changed, because restarting configd from a script configd launched
+would kill that script mid-run.
 
 ## Requirements
 
