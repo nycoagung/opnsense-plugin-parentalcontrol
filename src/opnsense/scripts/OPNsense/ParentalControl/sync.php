@@ -270,18 +270,31 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
 
 /* ---- status: report only ------------------------------------------------- */
 
+/**
+ * Current contents of the pf table.
+ *
+ * 'filter list table' answers {"items": [...]} - the payload is under 'items',
+ * not at the top level, which is how core's own alias utility reads it. Getting
+ * that wrong returns an empty list silently, which makes every address look
+ * absent: nothing is ever removed from the table, so a device stays blocked
+ * after its schedule reopens.
+ */
 function tableContents($backend, $alias)
 {
     $raw = $backend->configdpRun('filter list table', [$alias]);
-    $rows = json_decode(trim((string)$raw), true);
+    $decoded = json_decode(trim((string)$raw), true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+    $items = array_key_exists('items', $decoded) ? $decoded['items'] : $decoded;
     $out = [];
-    if (is_array($rows)) {
-        foreach ($rows as $row) {
-            if (is_array($row) && isset($row['ip'])) {
+    foreach ((array)$items as $row) {
+        if (is_array($row)) {
+            if (isset($row['ip'])) {
                 $out[] = $row['ip'];
-            } elseif (is_string($row)) {
-                $out[] = $row;
             }
+        } elseif (is_string($row) && $row !== '') {
+            $out[] = $row;
         }
     }
     return $out;
