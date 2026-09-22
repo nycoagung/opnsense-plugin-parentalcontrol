@@ -1,24 +1,24 @@
 #!/bin/sh
 # Parental Control plugin installer / updater.
 #
-# Run once on the firewall as root:
-#   fetch -o - https://raw.githubusercontent.com/nycoagung/opnsense-plugin-parentalcontrol/main/install.sh | sh
+# Bootstrap (one command, no GitHub API involved):
+#   fetch -qo /tmp/pc.tgz https://codeload.github.com/nycoagung/opnsense-plugin-parentalcontrol/tar.gz/refs/heads/main && \
+#     rm -rf /tmp/pcx && mkdir -p /tmp/pcx && tar -xzf /tmp/pc.tgz -C /tmp/pcx && \
+#     sh /tmp/pcx/opnsense-plugin-parentalcontrol-main/install.sh
 #
 # Afterwards:  configctl parentalcontrol install
 #
-# HOW FILES ARE FETCHED AND WHY:
-# One call to the GitHub API returns the tree - every path with its git blob SHA.
-# The files themselves then come from raw.githubusercontent, which is not rate
-# limited, and each one is verified against the SHA from that manifest.
+# WHY codeload AND NOT THE API OR raw:
+#   - the API costs one rate-limited request per file (60/hour per IP, and the
+#     firewall's own public IP is what counts). Fifteen files exhausted it.
+#   - raw.githubusercontent is CDN-cached, lags pushes by minutes and is cached
+#     per edge, so it silently serves stale content.
+#   - codeload serves the git ref directly: one request for the whole tree, no
+#     rate limit, and current. Measured: raw was serving a five-commit-old
+#     installer at the same moment codeload matched the repo byte for byte.
 #
-# This matters twice over. Fetching per-file from the API costs one rate-limited
-# request per file (60/hour unauthenticated), which a handful of installs
-# exhausts. And raw is CDN-cached, lags pushes by minutes and is cached per edge,
-# so it can serve stale content - which the SHA check now catches instead of
-# installing silently. A mismatch is retried, then falls back to the API for
-# that one file, and only then gives up.
-#
-# Set GITHUB_TOKEN to raise the API limit if you ever need to.
+# If this script is run from an already-extracted archive it installs from there
+# rather than downloading again, so the bootstrap above costs exactly one fetch.
 set -e
 
 GH_OWNER="${GH_OWNER:-nycoagung}"
@@ -29,30 +29,28 @@ MVC=/usr/local/opnsense/mvc/app
 WWW=/usr/local/opnsense/www/js/widgets
 SCRIPTS=/usr/local/opnsense/scripts/OPNsense/ParentalControl
 ACTIONS=/usr/local/opnsense/service/conf/actions.d
-
-command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
-[ -d "$MVC" ] || { echo "not an OPNsense system: $MVC missing" >&2; exit 1; }
-
 M="$MVC/models/OPNsense/ParentalControl"
 C="$MVC/controllers/OPNsense/ParentalControl"
 V="$MVC/views/OPNsense/ParentalControl"
-S=src/opnsense
+P=src/opnsense
+
+[ -d "$MVC" ] || { echo "not an OPNsense system: $MVC missing" >&2; exit 1; }
 
 FILES="
-$S/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalControl.xml
-$S/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
-$S/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$M/Menu/Menu.xml
-$S/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$M/ACL/ACL.xml
-$S/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$C/IndexController.php
-$S/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$C/Api/SettingsController.php
-$S/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$C/Api/ServiceController.php
-$S/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$C/forms/device.xml
-$S/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/general.xml
-$S/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
-$S/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
-$S/service/conf/actions.d/actions_parentalcontrol.conf|$ACTIONS/actions_parentalcontrol.conf
-$S/www/js/widgets/ParentalControl.js|$WWW/ParentalControl.js
-$S/www/js/widgets/Metadata/ParentalControl.xml|$WWW/Metadata/ParentalControl.xml
+$P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalControl.xml
+$P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
+$P/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$M/Menu/Menu.xml
+$P/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$M/ACL/ACL.xml
+$P/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$C/IndexController.php
+$P/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$C/Api/SettingsController.php
+$P/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$C/Api/ServiceController.php
+$P/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$C/forms/device.xml
+$P/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/general.xml
+$P/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
+$P/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
+$P/service/conf/actions.d/actions_parentalcontrol.conf|$ACTIONS/actions_parentalcontrol.conf
+$P/www/js/widgets/ParentalControl.js|$WWW/ParentalControl.js
+$P/www/js/widgets/Metadata/ParentalControl.xml|$WWW/Metadata/ParentalControl.xml
 install.sh|$SCRIPTS/install.sh
 "
 
@@ -60,89 +58,43 @@ hash_of() { [ -f "$1" ] && md5 -q "$1" 2>/dev/null || echo absent; }
 ACTIONS_BEFORE=$(hash_of "$ACTIONS/actions_parentalcontrol.conf")
 MODEL_BEFORE=$(hash_of "$M/ParentalControl.xml")
 
-ARGS=""
+HERE=$(dirname "$0")
+CLEAN=""
+if [ -d "$HERE/$P" ]; then
+    SRC="$HERE"
+    echo "installing from $SRC"
+else
+    TMP=$(mktemp -d /tmp/pcinst.XXXXXX)
+    CLEAN="$TMP"
+    echo "fetching ${GH_OWNER}/${GH_REPO}@${GH_REF} from codeload"
+    fetch -qo "$TMP/src.tgz" \
+        "https://codeload.github.com/${GH_OWNER}/${GH_REPO}/tar.gz/refs/heads/${GH_REF}"
+    tar -xzf "$TMP/src.tgz" -C "$TMP"
+    SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)
+    [ -n "$SRC" ] && [ -d "$SRC/$P" ] || { echo "archive did not contain $P" >&2; exit 1; }
+fi
+
+# Check the whole set is present before touching anything on disk, so a
+# truncated archive cannot leave a half-installed plugin behind.
 for entry in $FILES; do
     [ -n "$entry" ] || continue
-    mkdir -p "$(dirname "${entry#*|}")"
-    ARGS="$ARGS $entry"
+    s=${entry%%|*}
+    [ -f "$SRC/$s" ] || { echo "missing from source: $s" >&2; exit 1; }
 done
 
-# One process, one manifest request, all files verified before anything is swapped.
-python3 -c '
-import base64, hashlib, json, os, sys, urllib.request, urllib.error
-
-owner, repo, ref = sys.argv[1:4]
-pairs = [a.split("|", 1) for a in sys.argv[4:]]
-tok = os.environ.get("GITHUB_TOKEN", "").strip()
-hdr = {"Accept": "application/vnd.github+json", "User-Agent": "parentalcontrol-installer"}
-if tok:
-    hdr["Authorization"] = "Bearer " + tok
-
-def api(url):
-    try:
-        return json.load(urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=60))
-    except urllib.error.HTTPError as e:
-        if e.code == 403:
-            sys.stderr.write(
-                "GitHub API rate limit reached (60/hour per IP unauthenticated).\n"
-                "This installer needs exactly ONE API request; wait a few minutes,\n"
-                "or set GITHUB_TOKEN to raise the limit.\n")
-        raise
-
-tree = api("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1" % (owner, repo, ref))
-shas = {t["path"]: t["sha"] for t in tree.get("tree", []) if t.get("type") == "blob"}
-
-def blob_sha(data):
-    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
-
-def raw(path):
-    url = "https://raw.githubusercontent.com/%s/%s/%s/%s" % (owner, repo, ref, path)
-    req = urllib.request.Request(url, headers={"User-Agent": "parentalcontrol-installer",
-                                               "Cache-Control": "no-cache"})
-    return urllib.request.urlopen(req, timeout=60).read()
-
-fail = False
-for src, dst in pairs:
-    want = shas.get(src)
-    if want is None:
-        sys.stderr.write("  %-34s NOT IN REPO\n" % src.rsplit("/", 1)[-1]); fail = True; continue
-    data, how = None, ""
-    for attempt in (1, 2):
-        try:
-            d = raw(src)
-        except Exception:
-            d = None
-        if d is not None and blob_sha(d) == want:
-            data, how = d, "raw" if attempt == 1 else "raw/retry"
-            break
-    if data is None:
-        # raw is serving stale or unreachable content - fall back to the API for
-        # this one file only, so a bad edge costs one request, not fifteen
-        meta = api("https://api.github.com/repos/%s/%s/contents/%s?ref=%s" % (owner, repo, src, ref))
-        d = base64.b64decode(meta["content"])
-        if blob_sha(d) == want:
-            data, how = d, "api"
-    if data is None:
-        sys.stderr.write("  %-34s SHA MISMATCH - refusing\n" % src.rsplit("/", 1)[-1]); fail = True; continue
-    with open(dst + ".pcnew", "wb") as f:
-        f.write(data)
-    sys.stderr.write("  %-34s %s  %6d bytes  via %s\n" % (src.rsplit("/", 1)[-1], want[:12], len(data), how))
-
-sys.exit(1 if fail else 0)
-' "$GH_OWNER" "$GH_REPO" "$GH_REF" $ARGS
-
-# Nothing is swapped until every file above verified.
 for entry in $FILES; do
     [ -n "$entry" ] || continue
-    dst=${entry#*|}
-    mv "$dst.pcnew" "$dst"
-    case "$dst" in *.php) chmod 0755 "$dst" ;; *) chmod 0644 "$dst" ;; esac
+    s=${entry%%|*}; d=${entry#*|}
+    mkdir -p "$(dirname "$d")"
+    cp "$SRC/$s" "$d"
+    case "$d" in *.php|*.sh) chmod 0755 "$d" ;; *) chmod 0644 "$d" ;; esac
+    printf '  %-34s %6d bytes\n' "$(basename "$s")" "$(wc -c < "$d" | tr -d ' ')"
 done
-chmod 0755 "$SCRIPTS/install.sh"
+[ -n "$CLEAN" ] && rm -rf "$CLEAN"
 echo "files installed"
 
-# This script is reachable as 'configctl parentalcontrol install', and restarting
-# configd from a script configd launched would kill it mid-run - so only restart
+# This script is reachable as 'configctl parentalcontrol install'; restarting
+# configd from a script configd launched would kill it mid-run, so only restart
 # when the action file actually changed.
 if [ "$ACTIONS_BEFORE" != "$(hash_of "$ACTIONS/actions_parentalcontrol.conf")" ]; then
     service configd restart >/dev/null 2>&1 || true
