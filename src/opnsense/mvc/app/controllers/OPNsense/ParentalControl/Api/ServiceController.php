@@ -17,6 +17,12 @@ class ServiceController extends ApiControllerBase
         }
         $backend = new Backend();
         $output = trim($backend->configdRun('parentalcontrol sync'));
+        /* a type:script action returns the literal 'OK' on exit 0. Returning
+           'ok' regardless made every failure - alias validation, rule
+           validation, exit 1 - render as a green "changes applied". */
+        if ($output !== 'OK') {
+            return ['status' => 'failed', 'message' => $output];
+        }
         return ['status' => 'ok', 'output' => $output];
     }
 

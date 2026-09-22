@@ -21,7 +21,8 @@ class SettingsController extends ApiMutableModelControllerBase
     {
         return $this->searchBase(
             'devices',
-            ['enabled', 'name', 'address', 'mode', 'allow_from', 'allow_to', 'override', 'description']
+            ['enabled', 'name', 'address', 'mode', 'weekdays', 'allow_from', 'allow_to',
+             'override', 'description']
         );
     }
 

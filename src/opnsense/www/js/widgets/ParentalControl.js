@@ -43,7 +43,12 @@ export default class ParentalControl extends BaseWidget {
         </div>`);
     }
 
-    _esc(s) { return $('<div>').text(s === null || s === undefined ? '' : String(s)).html(); }
+    // Values land inside title="..." and data-uuid="...", and .text().html()
+    // leaves quotes intact - today only the model's masks stop that mattering.
+    _esc(s) {
+        return $('<div>').text(s === null || s === undefined ? '' : String(s)).html()
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
 
     _busy(on) {
         this._n = Math.max(0, (this._n || 0) + (on ? 1 : -1));

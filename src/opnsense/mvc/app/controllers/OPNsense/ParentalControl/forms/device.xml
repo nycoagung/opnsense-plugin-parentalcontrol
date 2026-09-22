@@ -40,7 +40,7 @@
         <id>device.allow_to</id>
         <label>Internet allowed until</label>
         <type>text</type>
-        <help>The time internet stops being available.</help>
+        <help>The time internet stops being available. Setting this equal to the start time means allowed all day.</help>
     </field>
     <field>
         <id>device.override</id>
