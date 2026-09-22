@@ -1,0 +1,12 @@
+<metadata>
+    <parentalcontrol>
+        <filename>ParentalControl.js</filename>
+        <link>/ui/parentalcontrol</link>
+        <endpoints>
+            <endpoint>/api/parentalcontrol/*</endpoint>
+        </endpoints>
+        <translations>
+            <title>Parental Control</title>
+        </translations>
+    </parentalcontrol>
+</metadata>
