@@ -66,17 +66,28 @@ echo "fetching from github api (${GH_OWNER}/${GH_REPO}@${GH_REF}):"
 
 # Stage every file first; swap them in only once all have verified, so a failed
 # or stale download can never leave a half-installed plugin behind.
-echo "$FILES" | while IFS='|' read -r src dst; do
-    [ -n "$src" ] || continue
+# Deliberately NOT `echo "$FILES" | while read`: a pipeline runs its loop in a
+# subshell, where `set -e` cannot abort the script. A failed verification would
+# print its error and the install would carry on to the swap regardless, which
+# is exactly the silent-stale-install this script exists to prevent.
+OLDIFS=$IFS
+IFS='
+'
+for entry in $FILES; do
+    [ -n "$entry" ] || continue
+    src=${entry%%|*}
+    dst=${entry#*|}
     mkdir -p "$(dirname "$dst")"
     fetch_verified "$src" "$dst.pcnew"
 done
 
-echo "$FILES" | while IFS='|' read -r src dst; do
-    [ -n "$src" ] || continue
+for entry in $FILES; do
+    [ -n "$entry" ] || continue
+    dst=${entry#*|}
     mv "$dst.pcnew" "$dst"
-    case "$dst" in *.php|*.py) chmod 0755 "$dst" ;; *) chmod 0644 "$dst" ;; esac
+    case "$dst" in *.php) chmod 0755 "$dst" ;; *) chmod 0644 "$dst" ;; esac
 done
+IFS=$OLDIFS
 chmod 0755 "$SCRIPTS/install.sh"
 echo "files installed"
 

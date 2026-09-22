@@ -71,7 +71,7 @@ export default class ParentalControl extends BaseWidget {
         $(document).on('click.parentalcontrol', '.pc-toggle', async function () {
             const uuid = $(this).data('uuid');
             // the switch shows the CURRENT state, so clicking it asks for the opposite
-            const want = $(this).data('blocked') ? 'allow' : 'block';
+            const want = $(this).attr('data-blocked') === '1' ? 'allow' : 'block';
             await self._setOverride(uuid, want);
         });
         $(document).on('click.parentalcontrol', '.pc-auto', async function () {
@@ -120,7 +120,7 @@ export default class ParentalControl extends BaseWidget {
                 const on = !d.blocked;
                 const overridden = d.override && d.override !== 'none';
                 const btn = `<button type="button" class="btn btn-xs pc-toggle ${on ? 'btn-success' : 'btn-danger'}"
-                             data-uuid="${this._esc(d.uuid)}" data-blocked="${d.blocked ? 1 : ''}"
+                             data-uuid="${this._esc(d.uuid)}" data-blocked="${d.blocked ? '1' : '0'}"
                              title="${on ? 'Block internet' : 'Allow internet'}">
                              <i class="fa fa-power-off fa-fw"></i> ${on ? 'On' : 'Off'}</button>`;
                 const auto = overridden

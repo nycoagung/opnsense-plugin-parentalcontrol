@@ -186,11 +186,16 @@ if (!$haveLocal) {
     $cfgChanged = true;
 }
 if ($cfgChanged) {
-    if ($aliasMdl->performValidation()->count() == 0) {
+    $val = $aliasMdl->performValidation();
+    if ($val->count() == 0) {
         $aliasMdl->serializeToConfig();
         Config::getInstance()->save();
     } else {
-        fwrite(STDERR, "alias validation failed\n");
+        /* print what actually failed - a bare "validation failed" makes a first
+           install impossible to diagnose without a shell */
+        foreach ($val->getMessages() as $msg) {
+            fwrite(STDERR, "alias: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
+        }
         exit(1);
     }
 }
@@ -218,12 +223,15 @@ if (!$haveRule) {
     $rule->destination_net = $localAlias;
     $rule->destination_not = '1';
     $rule->description = $ruleDescr;
-    if ($filterMdl->performValidation()->count() == 0) {
+    $val = $filterMdl->performValidation();
+    if ($val->count() == 0) {
         $filterMdl->serializeToConfig();
         Config::getInstance()->save();
         $cfgChanged = true;
     } else {
-        fwrite(STDERR, "rule validation failed\n");
+        foreach ($val->getMessages() as $msg) {
+            fwrite(STDERR, "rule: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
+        }
         exit(1);
     }
 }
