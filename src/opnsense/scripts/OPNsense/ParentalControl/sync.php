@@ -32,6 +32,14 @@ use OPNsense\ParentalControl\ParentalControl;
    assumption about this particular network, so it stays correct anywhere. */
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
+/* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
+   which would shift every window by the UTC offset while the UI agreed with
+   itself. Take the timezone from the firewall's own configuration. */
+$tz = (string)(Config::getInstance()->object()->system->timezone ?? '');
+if ($tz !== '' && @timezone_open($tz) !== false) {
+    date_default_timezone_set($tz);
+}
+
 $mode = isset($argv[1]) ? $argv[1] : 'sync';
 $mdl = new ParentalControl();
 $backend = new Backend();
@@ -69,27 +77,15 @@ function resolveDevice($dev, $enabled)
         return [true, 'always blocked'];
     }
 
-    /* scheduled: allowed inside the window on a selected day, blocked otherwise */
-    $days = array_filter(explode(',', (string)$dev->weekdays));
-    $today = strtolower(date('D'));                 /* mon, tue, ... */
-    if (!in_array($today, $days, true)) {
-        return [true, 'outside scheduled days'];
-    }
-    $now = (int)date('H') * 60 + (int)date('i');
-    $from = timeToMinutes((string)$dev->allow_from);
-    $to = timeToMinutes((string)$dev->allow_to);
-    if ($from === null || $to === null) {
-        return [false, 'no valid window'];
-    }
-    if ($from == $to) {
-        return [false, 'window covers the whole day'];
-    }
-    $inWindow = ($from < $to)
-        ? ($now >= $from && $now < $to)
-        : ($now >= $from || $now < $to);          /* window crosses midnight */
-    return $inWindow
-        ? [false, 'within allowed hours']
-        : [true, 'outside allowed hours'];
+    /* scheduled - decided by a pure function so it can be tested directly */
+    return scheduleDecision(
+        array_filter(explode(',', (string)$dev->weekdays)),
+        (int)date('H') * 60 + (int)date('i'),
+        timeToMinutes((string)$dev->allow_from),
+        timeToMinutes((string)$dev->allow_to),
+        strtolower(date('D')),
+        strtolower(date('D', strtotime('-1 day')))
+    );
 }
 
 function isMac($v)
@@ -131,17 +127,26 @@ function macToAddresses($mac)
 
     if ($leases === null) {
         $leases = [];
-        foreach (['/var/db/dnsmasq.leases', '/var/dhcpd/var/db/dhcpd.leases'] as $path) {
-            if (!is_readable($path)) {
-                continue;
-            }
+        /* dnsmasq only. The ISC path was removed: its lease file is a block
+           format, so a whitespace-split parser could never match a line of it,
+           and pretending otherwise hid the gap. Kea is not handled either. */
+        $path = '/var/db/dnsmasq.leases';
+        if (is_readable($path)) {
             foreach (@file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
-                /* dnsmasq: <expiry> <mac> <ip> <hostname> <clientid> */
+                /* <expiry> <mac> <ip> <hostname> <clientid> */
                 $parts = preg_split('/\s+/', trim($line));
-                if (count($parts) >= 3 && preg_match('/^[0-9a-fA-F:]{17}$/', $parts[1])
-                    && filter_var($parts[2], FILTER_VALIDATE_IP)) {
-                    $leases[strtolower($parts[1])][] = $parts[2];
+                if (count($parts) < 3
+                    || !preg_match('/^[0-9a-fA-F:]{17}$/', $parts[1])
+                    || !filter_var($parts[2], FILTER_VALIDATE_IP)) {
+                    continue;
                 }
+                /* An expired lease can point a MAC at an address some OTHER
+                   device now holds - blocking an innocent one. */
+                $exp = (int)$parts[0];
+                if ($exp > 0 && $exp < time()) {
+                    continue;
+                }
+                $leases[strtolower($parts[1])][] = $parts[2];
             }
         }
     }
@@ -222,6 +227,69 @@ function cronState()
         }
     }
     return 'absent';
+}
+
+/**
+ * The block rule is IPv4 only. On a dual-stack firewall a blocked device keeps
+ * full IPv6 internet and will prefer it, while every indicator says "blocked".
+ * Detect it so the UI can say so rather than lying by omission.
+ */
+function ipv6Active()
+{
+    $out = [];
+    @exec('/sbin/ifconfig -a 2>/dev/null', $out);
+    foreach ($out as $line) {
+        if (preg_match('/^\s+inet6\s+([0-9a-fA-F:]+)/', $line, $m)) {
+            $a = strtolower($m[1]);
+            if (strpos($a, 'fe80') !== 0 && $a !== '::1') {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Pure schedule decision. Takes plain values so it can be exercised without a
+ * model, a firewall or a clock - see tests/ScheduleTest.php.
+ *
+ * @param array  $days      selected weekday abbreviations, e.g. ['mon','fri']
+ * @param int    $nowMin    minutes since local midnight
+ * @param ?int   $from      window start in minutes, null if unparseable
+ * @param ?int   $to        window end in minutes, null if unparseable
+ * @param string $today     today's weekday abbreviation
+ * @param string $yesterday yesterday's weekday abbreviation
+ * @return array [bool blocked, string reason]
+ */
+function scheduleDecision($days, $nowMin, $from, $to, $today, $yesterday)
+{
+    /* Fail CLOSED. A scheduled device whose times were cleared must not become
+       permanently allowed - that is the wrong direction for a safety feature,
+       and it would contradict the empty-weekday case below, which blocks. */
+    if ($from === null || $to === null) {
+        return [true, 'scheduled but no valid time window'];
+    }
+    if ($from == $to) {
+        return [false, 'window covers the whole day'];
+    }
+
+    $crosses = $from > $to;
+    $inWindow = $crosses
+        ? ($nowMin >= $from || $nowMin < $to)
+        : ($nowMin >= $from && $nowMin < $to);
+
+    /* A window that crosses midnight belongs to the day it STARTED on:
+       "Friday 21:00-07:00" means Friday night into Saturday morning. Testing
+       today's weekday during the tail would block exactly the half the user
+       cares about, and allow the wrong morning instead. */
+    $owningDay = ($crosses && $nowMin < $to) ? $yesterday : $today;
+
+    if (!in_array($owningDay, $days, true)) {
+        return [true, 'outside scheduled days'];
+    }
+    return $inWindow
+        ? [false, 'within allowed hours']
+        : [true, 'outside allowed hours'];
 }
 
 function timeToMinutes($v)
@@ -309,6 +377,7 @@ if ($mode === 'status') {
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
+        'ipv6_active' => ipv6Active(),
         'alias' => $aliasName,
         'in_alias' => count($current),
         'alias_entries' => $current,
@@ -428,8 +497,16 @@ foreach ($toDel as $addr) {
    "off" mean off. Best effort: never fail the sync over it. */
 if ((string)$mdl->general->kill_states === '1') {
     foreach ($toAdd as $addr) {
-        $ip = explode('/', $addr)[0];
-        @exec('/sbin/pfctl -k ' . escapeshellarg($ip) . ' 2>&1', $o, $rc);
+        /* pfctl -k takes a host. For a CIDR, explode()[0] is the network
+           address - killing states for an address nobody holds. Skip those and
+           say so rather than appearing to have done something. */
+        if (strpos($addr, '/') !== false) {
+            fwrite(STDERR, "not dropping states for network $addr (pfctl -k takes a host)\n");
+            continue;
+        }
+        $out = [];
+        $rc = 0;
+        @exec('/sbin/pfctl -k ' . escapeshellarg($addr) . ' 2>&1', $out, $rc);
     }
 }
 

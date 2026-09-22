@@ -11,8 +11,8 @@
             <alias_name type="TextField">
                 <Default>NoInternet</Default>
                 <Required>Y</Required>
-                <Mask>/^[a-zA-Z0-9_]{1,31}$/</Mask>
-                <ValidationMessage>Letters, digits and underscore only, up to 31 characters.</ValidationMessage>
+                <Mask>/^[a-zA-Z0-9_]{1,25}$/</Mask>
+                <ValidationMessage>Letters, digits and underscore only, up to 25 characters. The companion alias appends &quot;_Local&quot; and pf table names cannot exceed 31.</ValidationMessage>
             </alias_name>
             <kill_states type="BooleanField">
                 <Default>1</Default>
@@ -57,11 +57,13 @@
                 </OptionValues>
             </weekdays>
             <allow_from type="TextField">
+                <Required>Y</Required>
                 <Default>07:00</Default>
                 <Mask>/^([01]\d|2[0-3]):([0-5]\d)$/</Mask>
                 <ValidationMessage>24-hour time, HH:MM.</ValidationMessage>
             </allow_from>
             <allow_to type="TextField">
+                <Required>Y</Required>
                 <Default>21:00</Default>
                 <Mask>/^([01]\d|2[0-3]):([0-5]\d)$/</Mask>
                 <ValidationMessage>24-hour time, HH:MM.</ValidationMessage>
@@ -76,7 +78,8 @@
                 </OptionValues>
             </override>
             <description type="TextField">
-                <Mask>/^.{0,255}$/u</Mask>
+                <Mask>/^[^&lt;&gt;&quot;'\\]{0,255}$/u</Mask>
+                <ValidationMessage>Up to 255 characters. Angle brackets, quotes and backslash are not allowed.</ValidationMessage>
             </description>
         </devices>
     </items>

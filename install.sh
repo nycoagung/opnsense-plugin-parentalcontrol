@@ -67,7 +67,7 @@ else
     TMP=$(mktemp -d /tmp/pcinst.XXXXXX)
     CLEAN="$TMP"
     echo "fetching ${GH_OWNER}/${GH_REPO}@${GH_REF} from codeload"
-    fetch -qo "$TMP/src.tgz" \
+    fetch -qT 30 -o "$TMP/src.tgz" \
         "https://codeload.github.com/${GH_OWNER}/${GH_REPO}/tar.gz/refs/heads/${GH_REF}"
     tar -xzf "$TMP/src.tgz" -C "$TMP"
     SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)

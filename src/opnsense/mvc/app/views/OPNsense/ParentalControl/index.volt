@@ -13,6 +13,13 @@
             toggle: '/api/parentalcontrol/settings/toggleDevice/',
             options: {
                 formatters: {
+                    // Escape explicitly rather than trusting the grid: description
+                    // is user-supplied, and a limited user holding this page's
+                    // privilege could otherwise store markup that a full admin
+                    // executes when viewing the list.
+                    safe: function (column, row) {
+                        return $('<div>').text(row[column.id] === undefined ? '' : row[column.id]).html();
+                    },
                     commands: function (column, row) {
                         return '<button type="button" class="btn btn-xs btn-default command-edit bootgrid-tooltip" ' +
                                'data-row-id="' + row.uuid + '"><span class="fa fa-pencil fa-fw"></span></button> ' +
@@ -136,7 +143,12 @@
                 $("#status-alias").text(data.alias + ' (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
                 var cron = {'enabled': '', 'disabled': "{{ lang._('schedule cron is disabled') }}",
                             'absent': "{{ lang._('schedule cron not installed') }}"}[data.cron] || '';
-                $("#status-cron").html(cron ? ' &middot; <span class="text-danger">' + cron + '</span>' : '');
+                var warn = cron ? [cron] : [];
+                if (data.ipv6_active) {
+                    warn.push("{{ lang._('IPv6 is active - blocked devices keep IPv6 internet access') }}");
+                }
+                $("#status-cron").html(warn.length
+                    ? ' &middot; <span class="text-danger">' + warn.join(' &middot; ') + '</span>' : '');
             });
         };
         loadStatus();
@@ -164,13 +176,14 @@
                 <tr>
                     <th data-column-id="uuid" data-type="string" data-identifier="true" data-visible="false">{{ lang._('ID') }}</th>
                     <th data-column-id="enabled" data-width="6em" data-type="string" data-formatter="rowtoggle">{{ lang._('Enabled') }}</th>
-                    <th data-column-id="name" data-type="string">{{ lang._('Name') }}</th>
-                    <th data-column-id="address" data-type="string">{{ lang._('Address') }}</th>
+                    <th data-column-id="name" data-type="string" data-formatter="safe">{{ lang._('Name') }}</th>
+                    <th data-column-id="address" data-type="string" data-formatter="safe">{{ lang._('Address') }}</th>
                     <th data-column-id="mode" data-type="string">{{ lang._('Mode') }}</th>
+                    <th data-column-id="weekdays" data-type="string">{{ lang._('Days') }}</th>
                     <th data-column-id="allow_from" data-type="string" data-width="6em">{{ lang._('From') }}</th>
                     <th data-column-id="allow_to" data-type="string" data-width="6em">{{ lang._('Until') }}</th>
                     <th data-column-id="override" data-type="string">{{ lang._('Override') }}</th>
-                    <th data-column-id="description" data-type="string">{{ lang._('Description') }}</th>
+                    <th data-column-id="description" data-type="string" data-formatter="safe">{{ lang._('Description') }}</th>
                     <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
                 </tr>
             </thead>
@@ -178,7 +191,7 @@
             <tfoot>
                 <tr>
                     <td></td>
-                    <td colspan="9"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
+                    <td colspan="10"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
                 </tr>
             </tfoot>
         </table>

@@ -8,9 +8,9 @@ and local dashboards keep working.
 
 ## How it enforces
 
-One externally-managed alias holds the addresses currently denied internet, and
-one floating rule blocks that alias to any destination outside private address
-space. Toggling a device is a pf table update, so it takes effect immediately
+Two aliases and one rule: an externally-managed alias holding the addresses
+currently denied internet, a companion alias defining private address space, and
+one floating rule blocking the first to anything outside the second. Toggling a device is a pf table update, so it takes effect immediately
 with no ruleset reload.
 
 Per-device rules were rejected deliberately: they do not scale, they apply
@@ -133,4 +133,11 @@ would kill that script mid-run.
 
 ## Requirements
 
-OPNsense 26.7 or later. IPv4 only.
+OPNsense 26.7 or later.
+
+**IPv4 only, and this matters.** The block rule is `inet`, so on a dual-stack
+firewall a blocked device keeps full internet over IPv6 — and will prefer it —
+while every indicator here says "blocked". The Status tab detects active IPv6
+and warns in red, but detection is not prevention: if you run IPv6, this plugin
+does not do what it claims. Blocking IPv6 properly needs a second rule plus
+`ndp`-based MAC resolution, which is not implemented.
