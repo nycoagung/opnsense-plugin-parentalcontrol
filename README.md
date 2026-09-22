@@ -139,6 +139,25 @@ The installer is safe to run from cron: it only restarts configd when the action
 file actually changed, because restarting configd from a script configd launched
 would kill that script mid-run.
 
+## Uninstall
+
+    /usr/local/opnsense/scripts/OPNsense/ParentalControl/uninstall.sh
+
+Flushes the pf table, deletes the rule, deletes both aliases, removes the cron
+job, then removes the files. Order matters: the table and rule go before the
+aliases they reference, so nothing is left blocked by an object that no longer
+has an owner. Everything is matched by description marker, so a renamed alias is
+still found. Safe to run repeatedly.
+
+Device settings stay in `config.xml`, so reinstalling restores them. Add
+`--purge` to remove those as well.
+
+The config-side cleanup is also available on its own as
+`configctl parentalcontrol uninstall` — useful to disable enforcement while
+leaving the plugin installed. The shell script is deliberately *not* a configd
+action, because it deletes the action file and restarts configd, and a script
+configd launched would be killed partway through that.
+
 ## Requirements
 
 OPNsense 26.7 or later.

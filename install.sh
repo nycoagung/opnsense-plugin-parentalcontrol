@@ -48,6 +48,8 @@ $P/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$C/forms/device
 $P/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/general.xml
 $P/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
 $P/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
+$P/scripts/OPNsense/ParentalControl/uninstall.php|$SCRIPTS/uninstall.php
+$P/scripts/OPNsense/ParentalControl/uninstall.sh|$SCRIPTS/uninstall.sh
 $P/service/conf/actions.d/actions_parentalcontrol.conf|$ACTIONS/actions_parentalcontrol.conf
 $P/www/js/widgets/ParentalControl.js|$WWW/ParentalControl.js
 $P/www/js/widgets/Metadata/ParentalControl.xml|$WWW/Metadata/ParentalControl.xml
