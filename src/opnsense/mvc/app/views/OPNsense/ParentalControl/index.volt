@@ -138,6 +138,12 @@
         };
         loadStatus();
         $("#refreshStatus").click(function () { loadStatus(); });
+
+        /* base_apply_button only emits the markup; without this the button has
+           no label and does nothing */
+        $("#reconfigureAct").SimpleActionButton({
+            onAction: function () { loadStatus(); }
+        });
     });
 </script>
 
@@ -158,6 +164,8 @@
                     <th data-column-id="name" data-type="string">{{ lang._('Name') }}</th>
                     <th data-column-id="address" data-type="string">{{ lang._('Address') }}</th>
                     <th data-column-id="mode" data-type="string">{{ lang._('Mode') }}</th>
+                    <th data-column-id="allow_from" data-type="string" data-width="6em">{{ lang._('From') }}</th>
+                    <th data-column-id="allow_to" data-type="string" data-width="6em">{{ lang._('Until') }}</th>
                     <th data-column-id="override" data-type="string">{{ lang._('Override') }}</th>
                     <th data-column-id="description" data-type="string">{{ lang._('Description') }}</th>
                     <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
@@ -167,7 +175,7 @@
             <tfoot>
                 <tr>
                     <td></td>
-                    <td colspan="7"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
+                    <td colspan="9"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
                 </tr>
             </tfoot>
         </table>
