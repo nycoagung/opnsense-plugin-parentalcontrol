@@ -133,7 +133,10 @@
                            '<td>' + badge + '</td></tr>';
                 }).join('');
                 $("#status-body").html(rows);
-                $("#status-alias").text(data.alias + '  (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
+                $("#status-alias").text(data.alias + ' (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
+                var cron = {'enabled': '', 'disabled': "{{ lang._('schedule cron is disabled') }}",
+                            'absent': "{{ lang._('schedule cron not installed') }}"}[data.cron] || '';
+                $("#status-cron").html(cron ? ' &middot; <span class="text-danger">' + cron + '</span>' : '');
             });
         };
         loadStatus();
@@ -182,18 +185,29 @@
     </div>
 
     <div id="status" class="tab-pane fade in">
-        <div class="content-box-main">
-            <p><b>{{ lang._('Alias') }}:</b> <span id="status-alias">-</span>
-               <button id="refreshStatus" type="button" class="btn btn-xs btn-default pull-right">
-                   <span class="fa fa-refresh fa-fw"></span> {{ lang._('Refresh') }}
-               </button></p>
+        <div class="table-responsive">
             <table class="table table-condensed table-striped">
-                <thead><tr>
-                    <th>{{ lang._('Name') }}</th>
-                    <th>{{ lang._('Address') }}</th>
-                    <th>{{ lang._('Reason') }}</th>
-                    <th>{{ lang._('State') }}</th>
-                </tr></thead>
+                <thead>
+                    {# the summary row lives inside the table so it lines up with
+                       the columns by construction, rather than by guessing padding #}
+                    <tr>
+                        <th colspan="3" style="border-bottom: none;">
+                            {{ lang._('Alias') }}: <span id="status-alias">-</span>
+                            <span id="status-cron" class="text-muted"></span>
+                        </th>
+                        <th style="border-bottom: none; text-align: right;">
+                            <button id="refreshStatus" type="button" class="btn btn-xs btn-default">
+                                <span class="fa fa-refresh fa-fw"></span> {{ lang._('Refresh') }}
+                            </button>
+                        </th>
+                    </tr>
+                    <tr>
+                        <th>{{ lang._('Name') }}</th>
+                        <th>{{ lang._('Address') }}</th>
+                        <th>{{ lang._('Reason') }}</th>
+                        <th>{{ lang._('State') }}</th>
+                    </tr>
+                </thead>
                 <tbody id="status-body"></tbody>
             </table>
         </div>

@@ -115,10 +115,17 @@ touch device state.
 
 These files are not owned by a package, so a firmware upgrade can remove them.
 
-- Cron *Apply parental control device states* **every minute** — schedules only
-  change state when this runs, so this one is required, not optional.
-- Cron *Install/refresh Parental Control plugin from upstream* weekly, to
-  reinstate the files after an upgrade removes them.
+- The **every-minute schedule job is created automatically** when you enable the
+  plugin, and disabled again when you disable it. It is not optional — schedules
+  are only re-evaluated when it runs, so without it the Status tab would show the
+  right answer while nothing actually changed. It appears in System → Settings →
+  Cron with origin `parentalcontrol`; the plugin owns it, so leave it alone.
+- Add cron *Install/refresh Parental Control plugin from upstream* weekly
+  yourself, to reinstate the files after an upgrade removes them.
+
+The Status tab flags it in red if that job is ever missing or disabled while the
+plugin is enabled, so a silently-inert install is visible rather than something
+you discover when a bedtime does not happen.
 
 The installer is safe to run from cron: it only restarts configd when the action
 file actually changed, because restarting configd from a script configd launched
