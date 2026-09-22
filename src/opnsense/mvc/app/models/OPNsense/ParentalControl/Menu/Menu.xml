@@ -1,0 +1,6 @@
+<menu>
+    <Firewall>
+        <ParentalControl VisibleName="Parental Control" url="/ui/parentalcontrol"
+                         cssClass="fa fa-child fa-fw" order="80"/>
+    </Firewall>
+</menu>

@@ -1,0 +1,83 @@
+<model>
+    <mount>//OPNsense/ParentalControl</mount>
+    <version>1.0.0</version>
+    <description>Per-device internet access control with schedules</description>
+    <items>
+        <general>
+            <enabled type="BooleanField">
+                <Default>0</Default>
+                <Required>Y</Required>
+            </enabled>
+            <alias_name type="TextField">
+                <Default>NoInternet</Default>
+                <Required>Y</Required>
+                <Mask>/^[a-zA-Z0-9_]{1,31}$/</Mask>
+                <ValidationMessage>Letters, digits and underscore only, up to 31 characters.</ValidationMessage>
+            </alias_name>
+            <kill_states type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </kill_states>
+        </general>
+        <devices type="ArrayField">
+            <enabled type="BooleanField">
+                <Default>1</Default>
+                <Required>Y</Required>
+            </enabled>
+            <name type="TextField">
+                <Required>Y</Required>
+                <Mask>/^[\w\-. ]{1,64}$/u</Mask>
+                <ValidationMessage>A short name, up to 64 characters.</ValidationMessage>
+            </name>
+            <address type="TextField">
+                <Required>Y</Required>
+                <Mask>/^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(\/(3[0-2]|[12]?\d))?$/</Mask>
+                <ValidationMessage>An IPv4 address or CIDR, e.g. 192.168.1.50 or 192.168.1.0/24.</ValidationMessage>
+            </address>
+            <mode type="OptionField">
+                <Required>Y</Required>
+                <Default>schedule</Default>
+                <OptionValues>
+                    <allow>Always allowed</allow>
+                    <block>Always blocked</block>
+                    <schedule>Scheduled</schedule>
+                </OptionValues>
+            </mode>
+            <weekdays type="OptionField">
+                <Multiple>Y</Multiple>
+                <Default>mon,tue,wed,thu,fri,sat,sun</Default>
+                <OptionValues>
+                    <mon>Monday</mon>
+                    <tue>Tuesday</tue>
+                    <wed>Wednesday</wed>
+                    <thu>Thursday</thu>
+                    <fri>Friday</fri>
+                    <sat>Saturday</sat>
+                    <sun>Sunday</sun>
+                </OptionValues>
+            </weekdays>
+            <allow_from type="TextField">
+                <Default>07:00</Default>
+                <Mask>/^([01]\d|2[0-3]):([0-5]\d)$/</Mask>
+                <ValidationMessage>24-hour time, HH:MM.</ValidationMessage>
+            </allow_from>
+            <allow_to type="TextField">
+                <Default>21:00</Default>
+                <Mask>/^([01]\d|2[0-3]):([0-5]\d)$/</Mask>
+                <ValidationMessage>24-hour time, HH:MM.</ValidationMessage>
+            </allow_to>
+            <override type="OptionField">
+                <Required>Y</Required>
+                <Default>none</Default>
+                <OptionValues>
+                    <none>No override</none>
+                    <allow>Force allow</allow>
+                    <block>Force block</block>
+                </OptionValues>
+            </override>
+            <description type="TextField">
+                <Mask>/^.{0,255}$/u</Mask>
+            </description>
+        </devices>
+    </items>
+</model>

@@ -1,0 +1,57 @@
+<form>
+    <field>
+        <id>device.enabled</id>
+        <label>Enabled</label>
+        <type>checkbox</type>
+        <help>Uncheck to ignore this device entirely.</help>
+    </field>
+    <field>
+        <id>device.name</id>
+        <label>Name</label>
+        <type>text</type>
+        <help>A name for this device, shown on the dashboard widget.</help>
+    </field>
+    <field>
+        <id>device.address</id>
+        <label>Address</label>
+        <type>text</type>
+        <help>IPv4 address or CIDR, e.g. 192.168.1.50 or 192.168.1.0/24. Give the device a static lease first, or its address will change and the rule will follow the wrong device.</help>
+    </field>
+    <field>
+        <id>device.mode</id>
+        <label>Mode</label>
+        <type>dropdown</type>
+        <help>Always allowed, always blocked, or allowed only during the hours below.</help>
+    </field>
+    <field>
+        <id>device.weekdays</id>
+        <label>Days</label>
+        <type>select_multiple</type>
+        <help>Days the schedule applies to. On other days the device is blocked.</help>
+        <style>tokenize</style>
+    </field>
+    <field>
+        <id>device.allow_from</id>
+        <label>Internet allowed from</label>
+        <type>text</type>
+        <help>24-hour HH:MM. A window where "from" is later than "to" crosses midnight.</help>
+    </field>
+    <field>
+        <id>device.allow_to</id>
+        <label>Internet allowed until</label>
+        <type>text</type>
+        <help>24-hour HH:MM.</help>
+    </field>
+    <field>
+        <id>device.override</id>
+        <label>Override</label>
+        <type>dropdown</type>
+        <help>Temporarily force the device allowed or blocked, ignoring the schedule. The dashboard widget sets this.</help>
+    </field>
+    <field>
+        <id>device.description</id>
+        <label>Description</label>
+        <type>text</type>
+        <help>Optional note for your own reference.</help>
+    </field>
+</form>
