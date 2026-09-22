@@ -32,6 +32,71 @@
             onAction: function () { reconfigure(); }
         });
 
+        /*
+         * Address suggestions from Dnsmasq. A native <datalist> is used rather
+         * than a select widget so the field stays a plain text input: typing an
+         * arbitrary address still works, and the model's own validation is
+         * unchanged.
+         *
+         * Which value is suggested depends on how the device is known:
+         *   - a static reservation suggests its IP, because the reservation
+         *     already pins that MAC to that address permanently
+         *   - a device seen only in a lease suggests its MAC, because its
+         *     address is dynamic and would drift
+         */
+        var choicesLoaded = false;
+        function loadAddressChoices() {
+            if (choicesLoaded) { return; }
+            choicesLoaded = true;
+            var seen = {};
+            var $list = $('#pc-address-list');
+            if ($list.length === 0) {
+                $list = $('<datalist id="pc-address-list"></datalist>').appendTo('body');
+            }
+            var add = function (value, label) {
+                if (!value || seen[value]) { return; }
+                seen[value] = true;
+                $list.append($('<option>').attr('value', value).attr('label', label));
+            };
+            /* dnsmasq writes '*' for a client that sent no hostname */
+            var nameOf = function (v, fallback) {
+                return (v && v !== '*') ? v : fallback;
+            };
+            ajaxCall('/api/dnsmasq/settings/searchHost', {rowCount: 1000}, function (hosts) {
+                var byIp = {};
+                ((hosts || {}).rows || []).forEach(function (h) {
+                    if (!h.ip) { return; }
+                    byIp[h.ip] = true;
+                    add(h.ip, nameOf(h.host, h.ip) + '  ·  reserved' + (h.hwaddr ? '  ·  ' + h.hwaddr : ''));
+                });
+                ajaxCall('/api/dnsmasq/leases/search', {rowCount: 1000}, function (leases) {
+                    ((leases || {}).rows || []).forEach(function (l) {
+                        if (!l.address || byIp[l.address]) { return; }
+                        if (l.hwaddr) {
+                            add(l.hwaddr, nameOf(l.hostname, l.address) + '  ·  ' + l.address + '  ·  dynamic, tracked by MAC');
+                        } else {
+                            add(l.address, nameOf(l.hostname, l.address) + '  ·  dynamic');
+                        }
+                    });
+                });
+            });
+        }
+
+        /* attach the list each time the dialog opens - the field is re-rendered */
+        $('#DialogDevice').on('shown.bs.modal', function () {
+            loadAddressChoices();
+            var $addr = $('#device\\.address');
+            $addr.attr('list', 'pc-address-list').attr('autocomplete', 'off');
+            $addr.off('change.pcfill').on('change.pcfill', function () {
+                /* fill an empty name from the chosen entry, never overwrite one */
+                var $name = $('#device\\.name');
+                if ($name.val()) { return; }
+                var opt = $('#pc-address-list option[value="' + $(this).val() + '"]').attr('label') || '';
+                var label = opt.split('  ·  ')[0];
+                if (label) { $name.val(label); }
+            });
+        });
+
         var data_get_map = {'frm_general': "/api/parentalcontrol/settings/get"};
         mapDataToFormUI(data_get_map).done(function () {
             formatTokenizersUI();

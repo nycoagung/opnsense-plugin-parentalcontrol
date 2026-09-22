@@ -24,7 +24,18 @@ nothing, so the plugin is inert until you add a device.
 
 ## Addressing a device
 
-The **Address** field takes an IPv4 address, a CIDR, or a MAC address.
+The **Address** field takes an IPv4 address, a CIDR, or a MAC address. It is a
+plain text box with a suggestion list built from Dnsmasq, so you can type a
+value or pick a known device — and what is suggested depends on how the device
+is known:
+
+- a device with a **static reservation** suggests its **IP**, because the
+  reservation already pins that MAC to that address permanently
+- a device seen only in a **lease** suggests its **MAC**, because its address is
+  dynamic and would otherwise drift
+
+Picking an entry fills an empty Name field from the device's hostname; an
+existing name is never overwritten.
 
 A MAC is resolved to whatever address the device currently holds — from ARP
 first, falling back to DHCP leases. This is not layer-2 filtering: pf has no MAC

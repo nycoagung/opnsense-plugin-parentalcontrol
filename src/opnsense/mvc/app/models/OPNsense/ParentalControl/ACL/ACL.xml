@@ -5,6 +5,9 @@
             <pattern>ui/parentalcontrol/*</pattern>
             <pattern>api/parentalcontrol/settings/*</pattern>
             <pattern>api/parentalcontrol/service/*</pattern>
+            <!-- address suggestions on the device dialog -->
+            <pattern>api/dnsmasq/settings/searchHost*</pattern>
+            <pattern>api/dnsmasq/leases/search*</pattern>
         </patterns>
     </page-firewall-parentalcontrol>
 </acl>
