@@ -7,3 +7,12 @@ ruleset reload.
 
 Blocked devices lose internet only - local services such as printers, media
 players and dashboards keep working.
+
+WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
+
+Plugin Changelog
+----------------
+
+0.0.1
+
+* Initial release
