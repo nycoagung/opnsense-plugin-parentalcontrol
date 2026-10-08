@@ -37,8 +37,8 @@ $removed = [];
 $aliasMdl = new Alias();
 $blockName = null;
 foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
-    if (strpos((string)$item->description, MARK_BLOCK) === 0) {
-        $blockName = (string)$item->name;
+    if (strpos($item->description->getValue(), MARK_BLOCK) === 0) {
+        $blockName = $item->name->getValue();
     }
 }
 if ($blockName !== null) {
@@ -50,7 +50,7 @@ if ($blockName !== null) {
 $filterMdl = new Filter();
 $ruleUuids = [];
 foreach ($filterMdl->rules->rule->iterateItems() as $uuid => $rule) {
-    if (strpos((string)$rule->description, MARK_RULE) === 0) {
+    if (strpos($rule->description->getValue(), MARK_RULE) === 0) {
         $ruleUuids[] = $uuid;
     }
 }
@@ -65,9 +65,9 @@ if (!empty($ruleUuids)) {
 /* 3. both aliases */
 $aliasUuids = [];
 foreach ($aliasMdl->aliases->alias->iterateItems() as $uuid => $item) {
-    $d = (string)$item->description;
+    $d = $item->description->getValue();
     if (strpos($d, MARK_BLOCK) === 0 || strpos($d, MARK_LOCAL) === 0) {
-        $aliasUuids[$uuid] = (string)$item->name;
+        $aliasUuids[$uuid] = $item->name->getValue();
     }
 }
 foreach ($aliasUuids as $uuid => $name) {
@@ -82,7 +82,7 @@ if (!empty($aliasUuids)) {
 $cron = new Cron();
 $jobUuids = [];
 foreach ($cron->jobs->job->iterateItems() as $uuid => $job) {
-    if ((string)$job->origin === 'parentalcontrol') {
+    if ($job->origin->isEqual('parentalcontrol')) {
         $jobUuids[] = $uuid;
     }
 }

@@ -4,7 +4,7 @@ namespace OPNsense\ParentalControl;
 
 class IndexController extends \OPNsense\Base\IndexController
 {
-    public function indexAction()
+    public function indexAction(): void
     {
         $this->view->generalForm = $this->getForm("general");
         $this->view->deviceForm = $this->getForm("device");

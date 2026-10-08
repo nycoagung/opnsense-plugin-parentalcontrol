@@ -21,6 +21,7 @@
 require_once("config.inc");
 require_once("util.inc");
 
+use OPNsense\Base\FieldTypes\BaseField;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\Firewall\Alias;
@@ -44,7 +45,8 @@ const MARK_RULE  = 'Parental Control: block internet';
 
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
    which would shift every window by the UTC offset while the UI agreed with
-   itself. Take the timezone from the firewall's own configuration. */
+   itself. Take the timezone from the firewall's own configuration (a SimpleXML
+   node, not a model field, so a string cast is how its text is read). */
 $tz = (string)(Config::getInstance()->object()->system->timezone ?? '');
 if ($tz !== '' && @timezone_open($tz) !== false) {
     date_default_timezone_set($tz);
@@ -54,51 +56,55 @@ $mode = isset($argv[1]) ? $argv[1] : 'sync';
 $mdl = new ParentalControl();
 $backend = new Backend();
 
-$aliasName = trim((string)$mdl->general->alias_name);
+/* Model fields are objects whose value is the text stored in config.xml:
+   BooleanFields hold '1' or '0'. Read them with getValue() and compare with
+   isEqual(), which return real strings and booleans. Testing a field directly
+   (if ($dev->enabled)) would always be true, because any object is. */
+$aliasName = trim($mdl->general->alias_name->getValue());
 if ($aliasName === '') {
     $aliasName = 'NoInternet';
 }
 $localAlias = $aliasName . '_Local';
-$enabled = (string)$mdl->general->enabled === '1';
+$enabled = $mdl->general->enabled->isEqual('1');
 
 /**
  * Resolve one device to blocked/allowed plus a human reason.
+ *
+ * @return array{bool, string} [blocked, reason]
  */
-function resolveDevice($dev, $enabled)
+function resolveDevice(BaseField $dev, bool $enabled): array
 {
     if (!$enabled) {
         return [false, 'plugin disabled'];
     }
-    if ((string)$dev->enabled !== '1') {
+    if (!$dev->enabled->isEqual('1')) {
         return [false, 'device disabled'];
     }
-    $override = (string)$dev->override;
-    if ($override === 'allow') {
+    if ($dev->override->isEqual('allow')) {
         return [false, 'override: allow'];
     }
-    if ($override === 'block') {
+    if ($dev->override->isEqual('block')) {
         return [true, 'override: block'];
     }
-    $mode = (string)$dev->mode;
-    if ($mode === 'allow') {
+    if ($dev->mode->isEqual('allow')) {
         return [false, 'always allowed'];
     }
-    if ($mode === 'block') {
+    if ($dev->mode->isEqual('block')) {
         return [true, 'always blocked'];
     }
 
     /* scheduled - decided by a pure function so it can be tested directly */
     return scheduleDecision(
-        array_filter(explode(',', (string)$dev->weekdays)),
+        array_filter(explode(',', $dev->weekdays->getValue())),
         (int)date('H') * 60 + (int)date('i'),
-        timeToMinutes((string)$dev->allow_from),
-        timeToMinutes((string)$dev->allow_to),
+        timeToMinutes($dev->allow_from->getValue()),
+        timeToMinutes($dev->allow_to->getValue()),
         strtolower(date('D')),
         strtolower(date('D', strtotime('-1 day')))
     );
 }
 
-function isMac($v)
+function isMac(string $v): bool
 {
     return (bool)preg_match('/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/', trim($v));
 }
@@ -113,8 +119,10 @@ function isMac($v)
  *
  * ARP is the live truth and is tried first; DHCP leases cover a device that is
  * powered on but has aged out of the ARP cache.
+ *
+ * @return list<string> IPv4 addresses, empty if the MAC is not seen
  */
-function macToAddresses($mac)
+function macToAddresses(string $mac): array
 {
     static $arp = null;
     static $leases = null;
@@ -144,7 +152,7 @@ function macToAddresses($mac)
         if (is_readable($path)) {
             foreach (@file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
                 /* <expiry> <mac> <ip> <hostname> <clientid> */
-                $parts = preg_split('/\s+/', trim($line));
+                $parts = preg_split('/\s+/', trim($line)) ?: [];
                 if (count($parts) < 3
                     || !preg_match('/^[0-9a-fA-F:]{17}$/', $parts[1])
                     || !filter_var($parts[2], FILTER_VALIDATE_IP)) {
@@ -172,14 +180,14 @@ function macToAddresses($mac)
  * Only writes when something genuinely differs. This runs once a minute, and
  * saving the config every minute would bloat the revision history for nothing.
  */
-function ensureCronJob($backend, $enabled)
+function ensureCronJob(Backend $backend, bool $enabled): void
 {
     $cron = new Cron();
     $want = $enabled ? '1' : '0';
     $found = null;
     foreach ($cron->jobs->job->iterateItems() as $job) {
-        if ((string)$job->origin === 'parentalcontrol'
-            && (string)$job->command === 'parentalcontrol sync') {
+        if ($job->origin->isEqual('parentalcontrol')
+            && $job->command->isEqual('parentalcontrol sync')) {
             $found = $job;
             break;
         }
@@ -188,7 +196,7 @@ function ensureCronJob($backend, $enabled)
     $changed = false;
     if ($found === null) {
         if (!$enabled) {
-            return false;               /* nothing to create, nothing to disable */
+            return;                     /* nothing to create, nothing to disable */
         }
         $job = $cron->jobs->job->Add();
         $job->origin = 'parentalcontrol';
@@ -203,20 +211,20 @@ function ensureCronJob($backend, $enabled)
         $job->parameters = '';
         $job->description = 'Parental Control: evaluate device schedules';
         $changed = true;
-    } elseif ((string)$found->enabled !== $want) {
+    } elseif (!$found->enabled->isEqual($want)) {
         $found->enabled = $want;
         $changed = true;
     }
 
     if (!$changed) {
-        return false;
+        return;
     }
     $val = $cron->performValidation();
     if ($val->count() > 0) {
         foreach ($val->getMessages() as $msg) {
             fwrite(STDERR, "cron: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
         }
-        return false;
+        return;
     }
     $cron->serializeToConfig();
     Config::getInstance()->save();
@@ -225,15 +233,14 @@ function ensureCronJob($backend, $enabled)
        registered action: it returns quietly and the crontab is never written,
        so the job sits in the config looking correct while never running. */
     $backend->configdRun('cron restart');
-    return true;
 }
 
-function cronState()
+function cronState(): string
 {
     foreach ((new Cron())->jobs->job->iterateItems() as $job) {
-        if ((string)$job->origin === 'parentalcontrol'
-            && (string)$job->command === 'parentalcontrol sync') {
-            return (string)$job->enabled === '1' ? 'enabled' : 'disabled';
+        if ($job->origin->isEqual('parentalcontrol')
+            && $job->command->isEqual('parentalcontrol sync')) {
+            return $job->enabled->isEqual('1') ? 'enabled' : 'disabled';
         }
     }
     return 'absent';
@@ -244,7 +251,7 @@ function cronState()
  * full IPv6 internet and will prefer it, while every indicator says "blocked".
  * Detect it so the UI can say so rather than lying by omission.
  */
-function ipv6Active()
+function ipv6Active(): bool
 {
     $out = [];
     @exec('/sbin/ifconfig -a 2>/dev/null', $out);
@@ -263,15 +270,15 @@ function ipv6Active()
  * Pure schedule decision. Takes plain values so it can be exercised without a
  * model, a firewall or a clock - see tests/ScheduleTest.php.
  *
- * @param array  $days      selected weekday abbreviations, e.g. ['mon','fri']
- * @param int    $nowMin    minutes since local midnight
- * @param ?int   $from      window start in minutes, null if unparseable
- * @param ?int   $to        window end in minutes, null if unparseable
- * @param string $today     today's weekday abbreviation
- * @param string $yesterday yesterday's weekday abbreviation
- * @return array [bool blocked, string reason]
+ * @param array<string> $days      selected weekday abbreviations, e.g. ['mon','fri']
+ * @param int           $nowMin    minutes since local midnight
+ * @param ?int          $from      window start in minutes, null if unparseable
+ * @param ?int          $to        window end in minutes, null if unparseable
+ * @param string        $today     today's weekday abbreviation
+ * @param string        $yesterday yesterday's weekday abbreviation
+ * @return array{bool, string} [blocked, reason]
  */
-function scheduleDecision($days, $nowMin, $from, $to, $today, $yesterday)
+function scheduleDecision(array $days, int $nowMin, ?int $from, ?int $to, string $today, string $yesterday): array
 {
     /* Fail CLOSED. A scheduled device whose times were cleared must not become
        permanently allowed - that is the wrong direction for a safety feature,
@@ -302,7 +309,7 @@ function scheduleDecision($days, $nowMin, $from, $to, $today, $yesterday)
         : [true, 'outside allowed hours'];
 }
 
-function timeToMinutes($v)
+function timeToMinutes(string $v): ?int
 {
     if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $v, $m)) {
         return null;
@@ -316,7 +323,7 @@ $devices = [];
 $blockSet = [];
 foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
     list($blocked, $reason) = resolveDevice($dev, $enabled);
-    $addr = trim((string)$dev->address);
+    $addr = trim($dev->address->getValue());
 
     /* a MAC is an identity, not something pf can match - resolve it to whatever
        address the device is using right now */
@@ -333,13 +340,13 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
 
     $devices[] = [
         'uuid' => $uuid,
-        'name' => (string)$dev->name,
+        'name' => $dev->name->getValue(),
         'address' => $addr,
         'is_mac' => isMac($addr),
         'resolved' => $resolved,
-        'mode' => (string)$dev->mode,
-        'override' => (string)$dev->override,
-        'enabled' => (string)$dev->enabled,
+        'mode' => $dev->mode->getValue(),
+        'override' => $dev->override->getValue(),
+        'enabled' => $dev->enabled->isEqual('1'),
         'blocked' => $blocked,
         'reason' => $reason,
     ];
@@ -360,8 +367,10 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
  * that wrong returns an empty list silently, which makes every address look
  * absent: nothing is ever removed from the table, so a device stays blocked
  * after its schedule reopens.
+ *
+ * @return list<string>
  */
-function tableContents($backend, $alias)
+function tableContents(Backend $backend, string $alias): array
 {
     $raw = $backend->configdpRun('filter list table', [$alias]);
     $decoded = json_decode(trim((string)$raw), true);
@@ -372,7 +381,7 @@ function tableContents($backend, $alias)
     $out = [];
     foreach ((array)$items as $row) {
         if (is_array($row)) {
-            if (isset($row['ip'])) {
+            if (isset($row['ip']) && is_string($row['ip'])) {
                 $out[] = $row['ip'];
             }
         } elseif (is_string($row) && $row !== '') {
@@ -409,7 +418,7 @@ $aliasMdl = new Alias();
 $blockNode = null;
 $localNode = null;
 foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
-    $d = (string)$item->description;
+    $d = $item->description->getValue();
     if (strpos($d, MARK_BLOCK) === 0) {
         $blockNode = $item;
     } elseif (strpos($d, MARK_LOCAL) === 0) {
@@ -429,8 +438,8 @@ if ($blockNode === null) {
     $blockNode->enabled = '1';
     $blockNode->description = MARK_BLOCK;
     $cfgChanged = true;
-} elseif ((string)$blockNode->name !== $aliasName) {
-    $staleTable = (string)$blockNode->name;
+} elseif (!$blockNode->name->isEqual($aliasName)) {
+    $staleTable = $blockNode->name->getValue();
     $blockNode->name = $aliasName;
     $cfgChanged = true;
 }
@@ -443,7 +452,7 @@ if ($localNode === null) {
     $localNode->content = implode("\n", LOCAL_NETS);
     $localNode->description = MARK_LOCAL . ' (block destination is NOT this)';
     $cfgChanged = true;
-} elseif ((string)$localNode->name !== $localAlias) {
+} elseif (!$localNode->name->isEqual($localAlias)) {
     $localNode->name = $localAlias;
     $cfgChanged = true;
 }
@@ -469,7 +478,7 @@ $ruleDescr = MARK_RULE . ' for ' . $aliasName;
 $filterMdl = new Filter();
 $ruleNode = null;
 foreach ($filterMdl->rules->rule->iterateItems() as $rule) {
-    if (strpos((string)$rule->description, MARK_RULE) === 0) {
+    if (strpos($rule->description->getValue(), MARK_RULE) === 0) {
         $ruleNode = $rule;
         break;
     }
@@ -478,15 +487,15 @@ $ruleChanged = false;
 if ($ruleNode !== null) {
     /* follow a rename: repoint the rule at the current alias names rather than
        leaving it enforcing against the old pair */
-    if ((string)$ruleNode->source_net !== $aliasName) {
+    if (!$ruleNode->source_net->isEqual($aliasName)) {
         $ruleNode->source_net = $aliasName;
         $ruleChanged = true;
     }
-    if ((string)$ruleNode->destination_net !== $localAlias) {
+    if (!$ruleNode->destination_net->isEqual($localAlias)) {
         $ruleNode->destination_net = $localAlias;
         $ruleChanged = true;
     }
-    if ((string)$ruleNode->description !== $ruleDescr) {
+    if (!$ruleNode->description->isEqual($ruleDescr)) {
         $ruleNode->description = $ruleDescr;
         $ruleChanged = true;
     }
@@ -546,7 +555,7 @@ foreach ($toDel as $addr) {
 /* Established connections survive a new block, so a stream already running
    keeps going until it ends by itself. Dropping their states is what makes
    "off" mean off. Best effort: never fail the sync over it. */
-if ((string)$mdl->general->kill_states === '1') {
+if ($mdl->general->kill_states->isEqual('1')) {
     foreach ($toAdd as $addr) {
         /* pfctl -k takes a host. For a CIDR, explode()[0] is the network
            address - killing states for an address nobody holds. Skip those and
@@ -555,9 +564,7 @@ if ((string)$mdl->general->kill_states === '1') {
             fwrite(STDERR, "not dropping states for network $addr (pfctl -k takes a host)\n");
             continue;
         }
-        $out = [];
-        $rc = 0;
-        @exec('/sbin/pfctl -k ' . escapeshellarg($addr) . ' 2>&1', $out, $rc);
+        @exec('/sbin/pfctl -k ' . escapeshellarg($addr) . ' >/dev/null 2>&1');
     }
 }
 

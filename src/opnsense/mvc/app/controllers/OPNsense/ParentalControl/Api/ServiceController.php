@@ -10,7 +10,7 @@ class ServiceController extends ApiControllerBase
     /**
      * Recompute every device's state and sync the alias.
      */
-    public function reconfigureAction()
+    public function reconfigureAction(): array
     {
         if (!$this->request->isPost()) {
             return ['status' => 'failed', 'message' => 'POST required'];
@@ -30,12 +30,12 @@ class ServiceController extends ApiControllerBase
      * Resolved state for every device, plus the alias contents actually loaded
      * into pf. Read-only; makes no changes.
      */
-    public function statusAction()
+    public function statusAction(): array
     {
         $backend = new Backend();
         $raw = trim($backend->configdRun('parentalcontrol status'));
         $decoded = json_decode($raw, true);
-        if ($decoded === null) {
+        if (!is_array($decoded)) {
             return ['status' => 'failed', 'message' => 'could not read status', 'raw' => $raw];
         }
         return $decoded;

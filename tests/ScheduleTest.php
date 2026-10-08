@@ -10,11 +10,12 @@
 
 /* the function under test, loaded without running the enforcement script */
 $src = file_get_contents(__DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/sync.php');
-preg_match('/function scheduleDecision\(.*?\n\}/s', $src, $m) || exit("could not extract scheduleDecision\n");
+($src !== false && preg_match('/function scheduleDecision\(.*?\n\}/s', $src, $m))
+    || exit("could not extract scheduleDecision\n");
 eval($m[0]);
 
 $ALL = ['mon','tue','wed','thu','fri','sat','sun'];
-$T = function ($h, $i = 0) { return $h * 60 + $i; };
+$T = function (int $h, int $i = 0): int { return $h * 60 + $i; };
 
 $cases = [
     // name, days, now, from, to, today, yesterday, expectBlocked

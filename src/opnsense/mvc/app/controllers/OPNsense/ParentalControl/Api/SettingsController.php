@@ -17,7 +17,7 @@ class SettingsController extends ApiMutableModelControllerBase
     protected static $internalModelName = 'parentalcontrol';
     protected static $internalModelClass = '\OPNsense\ParentalControl\ParentalControl';
 
-    public function searchDeviceAction()
+    public function searchDeviceAction(): array
     {
         return $this->searchBase(
             'devices',
@@ -26,27 +26,27 @@ class SettingsController extends ApiMutableModelControllerBase
         );
     }
 
-    public function getDeviceAction($uuid = null)
+    public function getDeviceAction(?string $uuid = null): array
     {
         return $this->getBase('device', 'devices', $uuid);
     }
 
-    public function addDeviceAction()
+    public function addDeviceAction(): array
     {
         return $this->addBase('device', 'devices');
     }
 
-    public function setDeviceAction($uuid)
+    public function setDeviceAction(string $uuid): array
     {
         return $this->setBase('device', 'devices', $uuid);
     }
 
-    public function delDeviceAction($uuid)
+    public function delDeviceAction(string $uuid): array
     {
         return $this->delBase('devices', $uuid);
     }
 
-    public function toggleDeviceAction($uuid, $enabled = null)
+    public function toggleDeviceAction(string $uuid, ?string $enabled = null): array
     {
         return $this->toggleBase('devices', $uuid, $enabled);
     }
@@ -55,7 +55,7 @@ class SettingsController extends ApiMutableModelControllerBase
      * Set a device's manual override and apply immediately. This is what the
      * dashboard widget's on/off switch calls.
      */
-    public function setOverrideAction($uuid = null)
+    public function setOverrideAction(?string $uuid = null): array
     {
         if (!$this->request->isPost()) {
             return ['result' => 'failed', 'message' => 'POST required'];
