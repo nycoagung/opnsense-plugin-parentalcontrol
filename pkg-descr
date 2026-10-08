@@ -13,6 +13,16 @@ WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 Plugin Changelog
 ----------------
 
+0.0.2
+
+* Model fields are read through their typed accessors, and the scripts and
+  API actions declare their types. Nothing visible changes
+* The status output gives each device's enabled flag as true or false
+  rather than "1" or "0"
+* Hardening from static analysis: a DHCP lease line that cannot be split is
+  skipped, only text addresses are taken from the pf table listing, and a
+  status answer that is not a JSON object is reported as a failure
+
 0.0.1
 
 * Initial release

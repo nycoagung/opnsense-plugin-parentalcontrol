@@ -179,6 +179,17 @@ The schedule logic has 19 table-driven tests in `tests/ScheduleTest.php`, which
 need no OPNsense and run anywhere PHP does. They were checked against the
 pre-fix logic and fail 4 cases there, so they test something real.
 
+**Static analysis (0.0.2)**, on 2026-10-08. PHPStan 2.3 at its strictest level
+(9), with OPNsense core 26.7.5's sources on its scan path, still reports only
+what it cannot follow: model fields reached through `__get`, Phalcon's view,
+core's own docblocks and `config.inc` on PHP's include path, plus the API
+actions' JSON arrays having no declared value types. Semgrep's PHP, JavaScript,
+secrets and security-audit rules, run over everything but the tests, report one
+finding: the `pfctl -k` call that drops a blocked device's connections. Its
+argument goes through `escapeshellarg()` and can only be an address that passed
+the model's IPv4/CIDR/MAC mask or the ARP and lease parsing. Every function, API
+action, configd action and installed file has a caller.
+
 **Not exercised:** the uninstall path. `uninstall.php` and `uninstall.sh` are
 lint-clean and their ordering is deliberate, but neither has been run end to end.
 `configctl parentalcontrol uninstall && configctl parentalcontrol sync` exercises
