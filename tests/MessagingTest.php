@@ -115,6 +115,53 @@ check('cidr valid: /32 is allowed', isIpv4Cidr('192.0.2.0/32'), true);
 /* ip2long() reads this as 192.0.2.10, inet_aton as 192.0.2.8 */
 check('cidr valid: leading zero rejected', isIpv4Cidr('192.0.2.010'), false);
 
+/* ---- isPublicIpv4 ---------------------------------------------------------- */
+
+/* what a resolver answers for a name it sinkholes, and the local ranges: blocking
+   any of them would cut a device off from its own network */
+check('public: private, loopback, unspecified, link-local and shared ranges are not',
+    array_map('isPublicIpv4', ['10.0.0.1', '172.16.0.1', '192.168.1.1', '127.0.0.1', '0.0.0.0', '169.254.1.1',
+        '100.64.0.1', '100.127.255.255']),
+    array_fill(0, 8, false));
+/* the documentation ranges stand for public addresses here, and 100.64.0.0/10 is
+   no wider than a /10 */
+check('public: other addresses are',
+    array_map('isPublicIpv4', ['192.0.2.1', '198.51.100.1', '203.0.113.1', '100.63.255.255', '100.128.0.0']),
+    array_fill(0, 5, true));
+check('public: only a bare, strict address',
+    array_map('isPublicIpv4', ['not-an-ip', '198.51.100.0/24', '2001:db8::1', '198.51.100.010']),
+    array_fill(0, 4, false));
+
+/* ---- canonicalTarget ------------------------------------------------------- */
+
+/* pf stores a device's CIDR in network form, and core's state filter rejects host bits */
+check('target: host bits give the network',
+    [canonicalTarget('192.0.2.10/24'), canonicalTarget('198.51.100.130/25'), canonicalTarget('203.0.113.7/0'),
+     canonicalTarget('192.0.2.10/024')],
+    ['192.0.2.0/24', '198.51.100.128/25', '0.0.0.0/0', '192.0.2.0/24']);
+check('target: an address, a network and a /32 stay as they are',
+    [canonicalTarget('192.0.2.10'), canonicalTarget('192.0.2.0/24'), canonicalTarget('192.0.2.10/32')],
+    ['192.0.2.10', '192.0.2.0/24', '192.0.2.10/32']);
+check('target: anything else stays as it is',
+    [canonicalTarget('00:00:5e:00:53:01'), canonicalTarget('2001:db8::1/64'), canonicalTarget('192.0.2.10/33'),
+     canonicalTarget('')],
+    ['00:00:5e:00:53:01', '2001:db8::1/64', '192.0.2.10/33', '']);
+
+/* ---- pfTableEntry, tableDiff ----------------------------------------------- */
+
+/* pfctl stores a network in network form and lists a /32 as a bare address */
+check('pf entry: as pfctl lists it',
+    array_map('pfTableEntry', ['198.51.100.7/32', '192.0.2.10/24', '192.0.2.0/24', '192.0.2.1', 'x']),
+    ['198.51.100.7', '192.0.2.0/24', '192.0.2.0/24', '192.0.2.1', 'x']);
+/* a /32 or a host-bit entry that pf already holds is neither added nor deleted
+   again, which would take it out of the table on every other run */
+check('table: entries pf already holds in its own form stay',
+    tableDiff(['198.51.100.7/32', '192.0.2.10/24'], ['198.51.100.7', '192.0.2.0/24']),
+    ['added' => [], 'removed' => []]);
+check('table: differences, added as wanted and deleted as listed',
+    tableDiff(['198.51.100.7/32', '203.0.113.0/24', '192.0.2.1'], ['198.51.100.7', '203.0.113.9', '198.51.100.0/24']),
+    ['added' => ['203.0.113.0/24', '192.0.2.1'], 'removed' => ['203.0.113.9', '198.51.100.0/24']]);
+
 /* ---- ipv4InAny ------------------------------------------------------------- */
 
 $any = ['192.0.2.0/28', '198.51.100.0/24'];
@@ -135,6 +182,10 @@ check('ranges: empty', parseRanges(''), []);
 check('ranges: trims lines, keeps input order',
     parseRanges("  203.0.113.0/28 \r\n\t198.51.100.0/24\r\n"),
     ['203.0.113.0/28', '198.51.100.0/24']);
+/* no service owns more than a /8: a wider line is a broken or hostile list */
+check('ranges: wider than a /8 is rejected',
+    parseRanges("0.0.0.0/0\n198.0.0.0/7\n198.0.0.0/8\n198.51.100.7\n"),
+    ['198.0.0.0/8', '198.51.100.7']);
 
 /* ---- filterCandidates ------------------------------------------------------ */
 
@@ -218,9 +269,11 @@ $slow = function (string $host) use (&$t, &$cost) {
 };
 $frozen = fn() => 0;
 
+$one = ['198.51.100.1'];
 check('resolve: budget',
     resolveAll(['a.example', 'b.example', 'c.example', 'd.example'], $slow, 1000, $clock),
-    ['addresses' => ['198.51.100.1'], 'skipped' => ['d.example'], 'failed' => []]);
+    ['addresses' => ['198.51.100.1'], 'skipped' => ['d.example'], 'failed' => [],
+     'answers' => ['a.example' => $one, 'b.example' => $one, 'c.example' => $one]]);
 /* the clock moves only when a lookup runs, so three lookups' worth of time means
    the skipped host was never looked up: waiting is what the budget is there to stop */
 $t = 0;
@@ -232,14 +285,16 @@ $t = 0;
 $cost = 500;
 check('resolve: budget reached exactly',
     resolveAll(['a.example', 'b.example', 'c.example'], $slow, 1000, $clock),
-    ['addresses' => ['198.51.100.1'], 'skipped' => ['c.example'], 'failed' => []]);
+    ['addresses' => ['198.51.100.1'], 'skipped' => ['c.example'], 'failed' => [],
+     'answers' => ['a.example' => $one, 'b.example' => $one]]);
 /* the real clock reads epoch milliseconds, so the budget must count from the
    first reading, not from the clock's zero */
 $t = 1700000000000;
 $cost = 400;
 check('resolve: budget counts from the first reading',
     resolveAll(['a.example', 'b.example', 'c.example', 'd.example'], $slow, 1000, $clock),
-    ['addresses' => ['198.51.100.1'], 'skipped' => ['d.example'], 'failed' => []]);
+    ['addresses' => ['198.51.100.1'], 'skipped' => ['d.example'], 'failed' => [],
+     'answers' => ['a.example' => $one, 'b.example' => $one, 'c.example' => $one]]);
 /* readings: the start, before a, before b; a fourth would be the clock stepping
    back, which must not let c through once the budget is spent */
 $readings = [0, 0, 1000, 0];
@@ -251,21 +306,40 @@ $steady = ['a.example' => ['198.51.100.1'], 'b.example' => ['198.51.100.2'],
            'c.example' => ['198.51.100.3']];
 check('resolve: once the budget is spent it stays spent',
     resolveAll(array_keys($steady), fn($h) => $steady[$h], 1000, $steppedBack),
-    ['addresses' => ['198.51.100.1'], 'skipped' => ['b.example', 'c.example'], 'failed' => []]);
+    ['addresses' => ['198.51.100.1'], 'skipped' => ['b.example', 'c.example'], 'failed' => [],
+     'answers' => ['a.example' => $one]]);
 /* a failed host does not stop the hosts after it */
 $failing = ['a.example' => ['198.51.100.1'], 'b.example' => false, 'c.example' => ['198.51.100.3']];
 check('resolve: failures listed',
     resolveAll(array_keys($failing), fn($h) => $failing[$h], 1000, $frozen),
-    ['addresses' => ['198.51.100.1', '198.51.100.3'], 'skipped' => [], 'failed' => ['b.example']]);
+    ['addresses' => ['198.51.100.1', '198.51.100.3'], 'skipped' => [], 'failed' => ['b.example'],
+     'answers' => ['a.example' => $one, 'c.example' => ['198.51.100.3']]]);
 check('resolve: empty answer is not a failure',
     resolveAll(['a.example'], fn($h) => [], 1000, $frozen),
-    ['addresses' => [], 'skipped' => [], 'failed' => []]);
+    ['addresses' => [], 'skipped' => [], 'failed' => [], 'answers' => ['a.example' => []]]);
+/* each name answered keeps its own addresses, sorted, unique and IPv4 only; a name
+   that failed or was skipped has none */
+$mixed = ['a.example' => ['198.51.100.9', '2001:db8::1', '198.51.100.7', '198.51.100.9'], 'b.example' => [],
+          'c.example' => false];
+check('resolve: each answered name keeps its own addresses',
+    resolveAll(array_keys($mixed), fn($h) => $mixed[$h], 1000, $frozen)['answers'],
+    ['a.example' => ['198.51.100.7', '198.51.100.9'], 'b.example' => []]);
 check('resolve: ipv6 ignored',
     resolveAll(['a.example'], fn($h) => ['2001:db8::1', '198.51.100.2'], 1000, $frozen)['addresses'],
     ['198.51.100.2']);
 check('resolve: addresses sorted',
     resolveAll(['a.example'], fn($h) => ['198.51.100.9', '198.51.100.7'], 1000, $frozen)['addresses'],
     ['198.51.100.7', '198.51.100.9']);
+
+/* ---- answerAddresses ------------------------------------------------------- */
+
+/* dns_get_record()'s records for one name: a sinkholed or local answer is never
+   learned, and a record with no usable address is skipped */
+check('answers: only the public addresses of a reply',
+    answerAddresses([['ip' => '198.51.100.7'], ['ip' => '10.0.0.1'], ['ip' => '0.0.0.0'],
+        ['type' => 'CNAME', 'target' => 'x.example'], ['ip' => 7], ['ip' => ['198.51.100.8']], new stdClass(),
+        ['ip' => '203.0.113.9']]),
+    ['198.51.100.7', '203.0.113.9']);
 
 /* ---- messagingHosts -------------------------------------------------------- */
 
@@ -285,10 +359,10 @@ check('hosts: with no app selected the notification names are still looked up',
 
 /* ---- updateLearned --------------------------------------------------------- */
 
-/* resolveAll() of the protected names: all answered; one failed; one out of time */
-$guarded = fn(array $addresses): array => ['addresses' => $addresses, 'skipped' => [], 'failed' => []];
-$failedGuard = ['addresses' => ['198.51.100.7'], 'skipped' => [], 'failed' => ['p.example']];
-$skippedGuard = ['addresses' => ['198.51.100.7'], 'skipped' => ['p.example'], 'failed' => []];
+/* protectedGuard() of the protected names: every one answered, now or recently; or
+   p.example with no answer at all */
+$guarded = fn(array $addresses): array => ['addresses' => $addresses, 'missing' => []];
+$pausedGuard = ['addresses' => ['198.51.100.7'], 'missing' => ['p.example']];
 
 /* The guard can change under an address learned earlier: a protected name may start
    resolving to it, or an update may widen the CDN list. Either must take it out of
@@ -311,27 +385,72 @@ check('learned: this run\'s answers pass the same guard before they are learned'
 check('learned: an address not seen for the maximum age is forgotten',
     updateLearned(['203.0.113.9' => $now - $maxAge - 1], [], $guarded([]), [], $now, $maxAge),
     []);
-/* A protected name left unanswered may share an address with an app, and this run
+/* A protected name with no answer may share an address with an app, and this run
    cannot tell which: learn nothing new rather than block it for a week. .9 is not
    stamped again and .10 is not learned. */
-check('learned: nothing new is learned when a protected lookup failed',
+check('learned: nothing new is learned while a protected name has no answer',
     updateLearned(['203.0.113.9' => $now - $day], ['203.0.113.9', '203.0.113.10'],
-        $failedGuard, [], $now, $maxAge),
-    ['203.0.113.9' => $now - $day]);
-check('learned: nothing new is learned when a protected lookup ran out of time',
-    updateLearned(['203.0.113.9' => $now - $day], ['203.0.113.9', '203.0.113.10'],
-        $skippedGuard, [], $now, $maxAge),
+        $pausedGuard, [], $now, $maxAge),
     ['203.0.113.9' => $now - $day]);
 /* what the guard did answer still takes learned addresses out: .7 is protected,
    .5 a CDN address */
-check('learned: with the guard incomplete the learned set is still re-filtered',
+check('learned: with learning paused the learned set is still re-filtered',
     updateLearned(['198.51.100.7' => $now - $day, '192.0.2.5' => $now - $day, '203.0.113.9' => $now - $day], [],
-        $failedGuard, ['192.0.2.0/24'], $now, $maxAge),
+        $pausedGuard, ['192.0.2.0/24'], $now, $maxAge),
     ['203.0.113.9' => $now - $day]);
-/* the rest is kept as it is: expiry waits for a run whose guard is complete */
-check('learned: with the guard incomplete nothing expires',
-    updateLearned(['203.0.113.9' => $now - $maxAge - 1], [], $failedGuard, [], $now, $maxAge),
-    ['203.0.113.9' => $now - $maxAge - 1]);
+check('learned: with learning paused old addresses still expire',
+    updateLearned(['203.0.113.9' => $now - $maxAge - 1, '203.0.113.10' => $now - $day], [], $pausedGuard, [],
+        $now, $maxAge),
+    ['203.0.113.10' => $now - $day]);
+
+/* ---- protectedGuard -------------------------------------------------------- */
+
+$pnames = ['p.example', 'q.example'];
+check('protected: every name answered',
+    protectedGuard($pnames, ['p.example' => ['203.0.113.1'], 'q.example' => []], [], $now, $maxAge),
+    ['addresses' => ['203.0.113.1'], 'missing' => [],
+     'memory' => ['p.example' => ['addresses' => ['203.0.113.1'], 'seen' => $now],
+                  'q.example' => ['addresses' => [], 'seen' => $now]]]);
+/* p failed and q ran out of time this run, so neither is in the answers; a kept
+   answer up to the maximum age stands in, and learning goes on; the addresses come
+   out sorted and once */
+$recent = ['p.example' => ['addresses' => ['203.0.113.2'], 'seen' => $now - $day],
+           'q.example' => ['addresses' => ['203.0.113.1', '203.0.113.2'], 'seen' => $now - $maxAge]];
+check('protected: a recent answer stands in for a failed lookup',
+    protectedGuard($pnames, [], $recent, $now, $maxAge),
+    ['addresses' => ['203.0.113.1', '203.0.113.2'], 'missing' => [], 'memory' => $recent]);
+/* an older one does not: learning pauses, and the old answer is kept, not used */
+$stale = ['q.example' => ['addresses' => ['203.0.113.2'], 'seen' => $now - $maxAge - 1]];
+check('protected: a stale answer leaves the name missing',
+    protectedGuard($pnames, ['p.example' => ['203.0.113.1']], $stale, $now, $maxAge),
+    ['addresses' => ['203.0.113.1'], 'missing' => ['q.example'],
+     'memory' => ['p.example' => ['addresses' => ['203.0.113.1'], 'seen' => $now]] + $stale]);
+check('protected: a name never answered is missing',
+    protectedGuard($pnames, ['p.example' => ['203.0.113.1']], [], $now, $maxAge)['missing'],
+    ['q.example']);
+/* an empty answer is an answer: it replaces the kept one */
+check('protected: an empty answer replaces the kept one',
+    protectedGuard(['p.example'], ['p.example' => []], ['p.example' => ['addresses' => ['203.0.113.1'],
+        'seen' => $now - $day]], $now, $maxAge),
+    ['addresses' => [], 'missing' => [], 'memory' => ['p.example' => ['addresses' => [], 'seen' => $now]]]);
+check('protected: a name no longer protected is forgotten',
+    protectedGuard(['p.example'], ['p.example' => ['203.0.113.1']],
+        ['old.example' => ['addresses' => ['203.0.113.9'], 'seen' => $now]], $now, $maxAge)['memory'],
+    ['p.example' => ['addresses' => ['203.0.113.1'], 'seen' => $now]]);
+
+/* ---- learnedForSelection --------------------------------------------------- */
+
+/* the learned set does not say which app an address came from, so taking an app away
+   starts it again; the names still selected are looked up again in the same run */
+$known = ['198.51.100.7' => $now];
+check('selection: an app taken away clears the learned set',
+    learnedForSelection($known, ['line', 'telegram'], ['line']), []);
+check('selection: an app added keeps it',
+    learnedForSelection($known, ['line'], ['line', 'telegram']), $known);
+check('selection: the same apps keep it, in any order',
+    learnedForSelection($known, ['line', 'telegram'], ['telegram', 'line']), $known);
+check('selection: an unknown last selection keeps it',
+    learnedForSelection($known, null, ['line']), $known);
 
 /* ---- rangesDue -------------------------------------------------------------- */
 
@@ -423,8 +542,9 @@ check('published: an app with no list address uses only its shipped ranges',
 
 /* ---- sanitizeCache --------------------------------------------------------- */
 
-$emptyCache = ['learned' => [], 'published' => [], 'refreshed_at' => null, 'errors' => []];
-/* u failed after a good download, v before any */
+$emptyCache = ['learned' => [], 'published' => [], 'protected' => [], 'apps' => null, 'refreshed_at' => null,
+               'errors' => []];
+/* u failed after a good download, v before any; q answered with nothing */
 $goodCache = [
     'learned' => ['198.51.100.7' => $now],
     'published' => [
@@ -432,20 +552,46 @@ $goodCache = [
         'u' => ['ranges' => ['203.0.113.0/28'], 'fetched_at' => $now - 2 * $day, 'failed_at' => $now - 60],
         'v' => ['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now - 60],
     ],
+    'protected' => [
+        'p.example' => ['addresses' => ['203.0.113.1', '203.0.113.2'], 'seen' => $now - $day],
+        'q.example' => ['addresses' => [], 'seen' => $now],
+    ],
+    'apps' => ['line', 'telegram'],
     'refreshed_at' => $now,
     'errors' => ['lookup failed: a.example'],
 ];
 check('cache: a well-formed cache is kept as it is', sanitizeCache($goodCache), $goodCache);
 check('cache: anything else at the top is an empty cache',
     [sanitizeCache(null), sanitizeCache('x'), sanitizeCache(new stdClass()),
-     sanitizeCache(['learned' => 5, 'published' => 'x'])],
+     sanitizeCache(['learned' => 5, 'published' => 'x', 'protected' => 'x'])],
     [$emptyCache, $emptyCache, $emptyCache, $emptyCache]);
-/* entry by entry: one bad entry costs only itself */
+/* entry by entry: one bad entry costs only itself; a sinkholed or local address
+   is never a learned server */
 check('cache: learned entries are judged one by one',
     sanitizeCache(['learned' => ['198.51.100.7' => $now, 'not-an-ip' => $now, '198.51.100.0/24' => $now,
-        '2001:db8::1' => $now, '198.51.100.8' => (string)$now, '198.51.100.9' => 1.5, '198.51.100.10' => null]])
+        '2001:db8::1' => $now, '198.51.100.8' => (string)$now, '198.51.100.9' => 1.5, '198.51.100.10' => null,
+        '10.0.0.1' => $now, '0.0.0.0' => $now, '100.64.0.1' => $now]])
         ['learned'],
     ['198.51.100.7' => $now]);
+check('cache: protected answers are judged one by one',
+    sanitizeCache(['protected' => [
+        'p.example' => ['addresses' => ['203.0.113.1'], 'seen' => $now],
+        'a.example' => ['addresses' => '203.0.113.1', 'seen' => $now],
+        'b.example' => ['addresses' => ['203.0.113.1', 7], 'seen' => $now],
+        'c.example' => ['addresses' => ['10.0.0.1'], 'seen' => $now],
+        'd.example' => ['addresses' => ['x' => '203.0.113.1'], 'seen' => $now],
+        'e.example' => ['addresses' => ['203.0.113.1'], 'seen' => (string)$now],
+        'f.example' => ['addresses' => ['203.0.113.1']],
+        'g.example' => 'x',
+        'h.example' => ['addresses' => [['203.0.113.1']], 'seen' => $now],
+        'i.example' => new stdClass(),
+    ]])['protected'],
+    ['p.example' => ['addresses' => ['203.0.113.1'], 'seen' => $now]]);
+/* an empty list is a selection of no apps; anything but a list of ids is unknown */
+check('cache: apps that are not a list of ids are unknown',
+    array_map(fn($apps) => sanitizeCache(['apps' => $apps])['apps'],
+        [[], ['line', 7], ['a' => 'line'], 'line', null, [['line']]]),
+    [[], null, null, null, null, null]);
 check('cache: published entries are judged one by one',
     sanitizeCache(['published' => [
         't' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now],
@@ -464,8 +610,25 @@ check('cache: published entries are judged one by one',
 check('cache: a refresh time or errors of the wrong type are dropped',
     [sanitizeCache(['refreshed_at' => (string)$now, 'errors' => ['a', 7, null, 'b']]),
      sanitizeCache(['refreshed_at' => $now, 'errors' => 'a'])],
-    [['learned' => [], 'published' => [], 'refreshed_at' => null, 'errors' => ['a', 'b']],
-     ['learned' => [], 'published' => [], 'refreshed_at' => $now, 'errors' => []]]);
+    [array_merge($emptyCache, ['refreshed_at' => null, 'errors' => ['a', 'b']]),
+     array_merge($emptyCache, ['refreshed_at' => $now, 'errors' => []])]);
+
+/* ---- refreshErrors --------------------------------------------------------- */
+
+/* the brief's wording, which status shows: lookups in the order given, failed before
+   skipped for each, then the downloads */
+check('errors: lookups, then downloads, as the brief words them',
+    refreshErrors([['failed' => ['a.example'], 'skipped' => ['b.example']],
+                   ['failed' => ['p.example'], 'skipped' => ['q.example']]], ['telegram'], []),
+    ['lookup failed: a.example', 'lookup skipped (time budget): b.example',
+     'lookup failed: p.example', 'lookup skipped (time budget): q.example',
+     'range download failed: telegram']);
+/* a pause is what matters most and status shows only the first few, so it leads */
+check('errors: paused learning comes first and names every missing name',
+    refreshErrors([['failed' => ['a.example'], 'skipped' => []]], [], ['p.example', 'q.example']),
+    ['learning paused: no answer for p.example, q.example', 'lookup failed: a.example']);
+check('errors: none when nothing went wrong',
+    refreshErrors([['failed' => [], 'skipped' => []]], [], []), []);
 
 /* ---- selectStatesToDrop ---------------------------------------------------- */
 
@@ -543,6 +706,28 @@ check('states: a row missing any key is ignored',
          ['id' => 'j/4', 'proto' => 'tcp', 'dst_addr' => '198.51.100.7']],
         ['198.51.100.7'], 5228, 5230),
     []);
+
+/* ---- dropPlan -------------------------------------------------------------- */
+
+/* what to hand selectStatesToDrop() for one device in the device table */
+check('drops: a device new to the table loses every server and the notification ports',
+    dropPlan('192.0.2.10', ['192.0.2.10'], ['198.51.100.0/24', '203.0.113.7'], ['203.0.113.7'], 5228, 5230),
+    ['destinations' => ['198.51.100.0/24', '203.0.113.7'], 'portLo' => 5228, 'portHi' => 5230]);
+check('drops: a device already there loses only the servers added this run',
+    dropPlan('192.0.2.10', ['192.0.2.20'], ['198.51.100.0/24', '203.0.113.7'], ['203.0.113.7'], 5228, 5230),
+    ['destinations' => ['203.0.113.7'], 'portLo' => 1, 'portHi' => 0]);
+check('drops: a device already there is left alone when no server was added',
+    dropPlan('192.0.2.10', ['192.0.2.20'], ['198.51.100.0/24'], [], 5228, 5230),
+    null);
+
+/* ---- stateKilled ----------------------------------------------------------- */
+
+/* pfctl says "killed N states" for any N; anything else, an empty answer from
+   configd included, did not run */
+check('kill: only pfctl\'s own answer counts',
+    array_map('stateKilled', ['killed 1 states for id 00000000000000a1/01', "killed 0 states\n", '',
+        'pfctl: wrong id format specified', 'Execute error', 'no states killed']),
+    [true, true, false, false, false, false]);
 
 /* ---- aliasConflicts -------------------------------------------------------- */
 

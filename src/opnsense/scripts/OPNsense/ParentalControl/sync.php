@@ -405,7 +405,6 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
        address the device is using right now */
     if (isMac($addr)) {
         $targets = macToAddresses($addr);
-        $resolved = empty($targets) ? '' : implode(', ', $targets);
         if (empty($targets) && $blocked) {
             $reason .= ' (MAC not currently resolvable)';
         }
@@ -414,8 +413,10 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
         }
     } else {
         $targets = $addr === '' ? [] : [$addr];
-        $resolved = $addr;
     }
+    /* in the form pf keeps, so the table diffs settle and core's state filter takes it */
+    $targets = array_map('canonicalTarget', $targets);
+    $resolved = implode(', ', $targets);
 
     $devices[] = [
         'uuid' => $uuid,
@@ -486,17 +487,14 @@ function tableContents(Backend $backend, string $alias): array
  */
 function syncTable(Backend $backend, string $table, array $want): array
 {
-    $current = tableContents($backend, $table);
-    $added = array_values(array_diff($want, $current));
-    $removed = array_values(array_diff($current, $want));
-
-    foreach ($added as $addr) {
+    $diff = tableDiff($want, tableContents($backend, $table));
+    foreach ($diff['added'] as $addr) {
         $backend->configdpRun('filter add table', [$table, $addr]);
     }
-    foreach ($removed as $addr) {
+    foreach ($diff['removed'] as $addr) {
         $backend->configdpRun('filter delete table', [$table, $addr]);
     }
-    return ['added' => $added, 'removed' => $removed];
+    return $diff;
 }
 
 /**
@@ -622,7 +620,7 @@ function messagingData(): ?array
  * the last refresh's time and errors. A missing or damaged file reads as empty,
  * entry by entry (sanitizeCache()).
  *
- * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>}
+ * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>}
  */
 function readCache(): array
 {
@@ -905,19 +903,20 @@ printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), 
  * Refresh the server list and load it into its table.
  *
  * Resolves the notification services' names and the selected apps' names, learns
- * the answers that the guard (protected names, shared CDNs) lets through when every
- * protected name was answered, downloads each published list once a day (an hour
- * after a failed download at the soonest), and makes the servers table hold the
- * learned addresses, the published ranges and the notification services' ranges.
- * A failed lookup or download never empties the list: a learned address stays for
- * a week, and a published list falls back to its last good copy, then to the
- * shipped one.
+ * the answers that the guard (protected names, shared CDNs) lets through unless a
+ * protected name has no answer, this run or a recent one, downloads each published
+ * list once a day (an hour after a failed download at the soonest), and makes the
+ * servers table hold the learned addresses, the published ranges and the
+ * notification services' ranges. A failed lookup or download never empties the
+ * list: a learned address stays for a week, and a published list falls back to its
+ * last good copy, then to the shipped one. Only taking an app out of the selection
+ * starts the learned set again.
  *
  * @param array<string, mixed> $data  messaging.json
  * @param array<string>        $apps  the selected app ids
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>} $cache
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
  *        readCache()
- * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: int, errors: list<string>}}
+ * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: list<string>, refreshed_at: int, errors: list<string>}}
  *         this run's servers, the ones the table gained, and the cache to write
  */
 function refreshServerList(Backend $backend, array $data, array $apps, array $cache): array
@@ -927,21 +926,25 @@ function refreshServerList(Backend $backend, array $data, array $apps, array $ca
     putenv('RES_OPTIONS=timeout:1 attempts:1');
     $lookup = function (string $host) {
         $records = @dns_get_record($host, DNS_A);
-        return $records === false ? false : array_column($records, 'ip');
+        return $records === false ? false : answerAddresses($records);
     };
     $nowMs = fn(): int => (int)(microtime(true) * 1000);
     $selected = array_intersect_key($data['apps'], array_flip($apps));
+    $selectedIds = array_keys($selected);
+    sort($selectedIds);
 
     $found = resolveAll(messagingHosts($selected, $data['notifications']), $lookup, 20000, $nowMs);
-    $guard = resolveAll($data['protected_hosts'], $lookup, 10000, $nowMs);
+    $answered = resolveAll($data['protected_hosts'], $lookup, 10000, $nowMs);
     $now = time();
-    /* stamped with the hour, so the set changes only when an address does */
+    /* stamped with the hour, so the cache changes only when an answer does */
+    $hour = intdiv($now, 3600) * 3600;
+    $guard = protectedGuard($data['protected_hosts'], $answered['answers'], $cache['protected'], $hour, 7 * 86400);
     $learned = updateLearned(
-        $cache['learned'],
+        learnedForSelection($cache['learned'], $cache['apps'], $selectedIds),
         $found['addresses'],
         $guard,
         $data['shared_cdn_ranges'],
-        intdiv($now, 3600) * 3600,
+        $hour,
         7 * 86400
     );
     $context = stream_context_create(['http' => ['timeout' => 10]]);
@@ -963,23 +966,13 @@ function refreshServerList(Backend $backend, array $data, array $apps, array $ca
     $diff = syncTable($backend, MSG_SERVERS_ALIAS, $dest);
     printf("messaging servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
 
-    $errors = [];
-    foreach ([$found, $guard] as $result) {
-        foreach ($result['failed'] as $host) {
-            $errors[] = "lookup failed: $host";
-        }
-        foreach ($result['skipped'] as $host) {
-            $errors[] = "lookup skipped (time budget): $host";
-        }
-    }
-    foreach ($published['failed'] as $app) {
-        $errors[] = "range download failed: $app";
-    }
     return [$dest, $diff['added'], [
         'learned' => $learned,
         'published' => $published['published'],
+        'protected' => $guard['memory'],
+        'apps' => $selectedIds,
         'refreshed_at' => time(),
-        'errors' => $errors,
+        'errors' => refreshErrors([$found, $answered], $published['failed'], $guard['missing']),
     ]];
 }
 
@@ -988,7 +981,7 @@ function refreshServerList(Backend $backend, array $data, array $apps, array $ca
  * file rather than half a new one. A failure goes to STDERR; the next run writes
  * it again.
  *
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>} $cache
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
  */
 function writeCache(array $cache): void
 {
@@ -996,6 +989,8 @@ function writeCache(array $cache): void
     $json = json_encode([
         'learned' => (object)$cache['learned'],         /* {} rather than [] when empty */
         'published' => (object)$cache['published'],
+        'protected' => (object)$cache['protected'],
+        'apps' => $cache['apps'],
         'refreshed_at' => $cache['refreshed_at'],
         'errors' => $cache['errors'],
     ], JSON_INVALID_UTF8_SUBSTITUTE);
@@ -1034,46 +1029,54 @@ if ($msgObjectsOk && $msgInUse) {
 /* ---- sync the messaging device table ------------------------------------- */
 
 /**
- * Drop the open connections that this run's messaging block should cut.
+ * Drop the open connections that this run's messaging block should cut, as
+ * dropPlan() says for each device in the device table, so an open chat or
+ * notification channel does not carry on. Nothing else is touched (see
+ * selectStatesToDrop()).
  *
- * A device that entered the device table this run loses its connections to this
- * run's servers and to the notification ports, so an open chat or notification
- * channel does not carry on. A device that was in it already loses only its
- * connections to the servers added this run. Nothing else is touched (see
- * selectStatesToDrop()). Best effort: a failure goes to STDERR and the sync goes on.
+ * Best effort, device by device: a failure goes to STDERR and the next device is
+ * still done. An exception is also returned, so that status can show it.
  *
  * @param array<string> $targets   every address in the device table
  * @param array<string> $added     the ones added this run
  * @param array<string> $dest      this run's servers; [] when the list was not refreshed
  * @param array<string> $addedDest the servers added to their table this run
+ * @return list<string> the exceptions, one line each
  */
-function dropMessagingStates(Backend $backend, array $targets, array $added, array $dest, array $addedDest): void
+function dropMessagingStates(Backend $backend, array $targets, array $added, array $dest, array $addedDest): array
 {
+    $failures = [];
     foreach ($targets as $target) {
-        $isNew = in_array($target, $added, true);
-        if (!$isNew && $addedDest === []) {
-            continue;
-        }
-        /* every state with the target on either side: an empty limit, offset,
-           label or sort is ignored */
-        $raw = $backend->configdpRun('filter list states', [$target, '', '', '', '']);
-        $rows = json_decode((string)$raw, true)['details'] ?? null;
-        if (!is_array($rows)) {
-            fwrite(STDERR, "messaging: cannot list the connections of $target\n");
-            continue;
-        }
-        $ids = $isNew
-            ? selectStatesToDrop($rows, $dest, NOTIFY_PORT_LO, NOTIFY_PORT_HI)
-            : selectStatesToDrop($rows, $addedDest, 1, 0);      /* 1..0 holds no port */
-        foreach ($ids as $id) {
-            /* "hexid/hexcreator", as core's own state page passes it */
-            if (!preg_match('/^([0-9a-f]+)\/([0-9a-f]+)$/i', $id, $m)) {
-                fwrite(STDERR, "messaging: not a state id: $id\n");
+        try {
+            $plan = dropPlan($target, $added, $dest, $addedDest, NOTIFY_PORT_LO, NOTIFY_PORT_HI);
+            if ($plan === null) {
                 continue;
             }
-            $backend->configdpRun('filter kill state', [$m[1], $m[2]]);
+            /* every state with the target on either side: an empty limit, offset,
+               label or sort is ignored */
+            $raw = $backend->configdpRun('filter list states', [$target, '', '', '', '']);
+            $rows = json_decode((string)$raw, true)['details'] ?? null;
+            if (!is_array($rows)) {
+                fwrite(STDERR, "messaging: cannot list the connections of $target\n");
+                continue;
+            }
+            foreach (selectStatesToDrop($rows, $plan['destinations'], $plan['portLo'], $plan['portHi']) as $id) {
+                /* "hexid/hexcreator", as core's own state page passes it */
+                if (!preg_match('/^([0-9a-f]+)\/([0-9a-f]+)$/i', $id, $m)) {
+                    fwrite(STDERR, "messaging: not a state id: $id\n");
+                    continue;
+                }
+                $answer = (string)$backend->configdpRun('filter kill state', [$m[1], $m[2]]);
+                if (!stateKilled($answer)) {
+                    fwrite(STDERR, "messaging: dropping state $id failed: " . trim($answer) . "\n");
+                }
+            }
+        } catch (\Throwable $e) {
+            $failures[] = "dropping connections of $target failed: " . $e->getMessage();
+            fwrite(STDERR, 'messaging: ' . end($failures) . "\n");
         }
     }
+    return $failures;
 }
 
 /* Every run, in use or not: a device switched back to "Not blocked", or the
@@ -1091,15 +1094,11 @@ if ($msgObjectsOk) {
 
     /* As for the internet switch, a new block must also cut what is already open. */
     if ($mdl->general->kill_states->isEqual('1')) {
-        try {
-            dropMessagingStates($backend, $msgWant, $msgDiff['added'], $dest, $addedDest);
-        } catch (\Throwable $e) {
-            fwrite(STDERR, 'messaging: dropping connections failed: ' . $e->getMessage() . "\n");
-            /* status shows the errors the cache holds */
-            if ($cache !== null) {
-                $cache['errors'][] = 'dropping connections failed: ' . $e->getMessage();
-                writeCache($cache);
-            }
+        $failures = dropMessagingStates($backend, $msgWant, $msgDiff['added'], $dest, $addedDest);
+        /* status shows the errors the cache holds */
+        if ($failures !== [] && $cache !== null) {
+            $cache['errors'] = array_merge($cache['errors'], $failures);
+            writeCache($cache);
         }
     }
 }

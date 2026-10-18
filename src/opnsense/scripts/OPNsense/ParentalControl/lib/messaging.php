@@ -96,12 +96,78 @@ function ipv4InAny(string $ip, array $cidrs): bool
 }
 
 /**
+ * A public IPv4 address: isIpv4(), outside the private and reserved ranges, and
+ * outside the shared address space of carrier-grade NAT (100.64.0.0/10).
+ *
+ * A DNS answer must pass this before it is learned: a resolver that sinkholes a
+ * name answers 0.0.0.0 or a local address, and blocking that would cut a device off
+ * from its own network. Device addresses are not held to it.
+ */
+function isPublicIpv4(string $s): bool
+{
+    $flags = FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+    return filter_var($s, FILTER_VALIDATE_IP, $flags) !== false && !ipv4InCidr($s, '100.64.0.0/10');
+}
+
+/**
+ * A device target as pf stores it: an IPv4 CIDR with host bits set becomes its
+ * network, so 192.0.2.10/24 is 192.0.2.0/24. Anything else comes back as it is: an
+ * address, a CIDR already in network form, a /32, and whatever is not an IPv4 CIDR.
+ *
+ * The device field accepts host bits, but pf keeps the network form, so the table
+ * diff would never settle on the typed one, and core's state filter rejects host
+ * bits, so the drops would find nothing.
+ */
+function canonicalTarget(string $target): string
+{
+    if (!isIpv4Cidr($target) || !str_contains($target, '/')) {
+        return $target;
+    }
+    [$net, $bits] = explode('/', $target);
+    $mask = (~0 << (32 - (int)$bits)) & 0xFFFFFFFF;
+    return long2ip(ip2long($net) & $mask) . '/' . (int)$bits;
+}
+
+/**
+ * A pf table entry as pfctl lists it: a network in its network form
+ * (canonicalTarget()), and a /32 as the bare address, since pfctl prints a prefix
+ * only when it is shorter than a host's.
+ */
+function pfTableEntry(string $entry): string
+{
+    $entry = canonicalTarget($entry);
+    return str_ends_with($entry, '/32') ? substr($entry, 0, -3) : $entry;
+}
+
+/**
+ * What to add to and delete from a pf table so that it holds $want, matching each
+ * entry the way pf lists it (pfTableEntry()). Compared as written, a wanted /32,
+ * such as a notification service's address, never matches its bare listing, so it
+ * would be deleted on one run and added back on the next.
+ *
+ * @param array<string> $want    the entries wanted, as written
+ * @param array<string> $current the entries the table lists, in pf's own form
+ * @return array{added: list<string>, removed: list<string>} added as written in
+ *         $want, removed as listed
+ */
+function tableDiff(array $want, array $current): array
+{
+    $listed = array_flip($current);
+    $wanted = array_flip(array_map('pfTableEntry', $want));
+    return [
+        'added' => array_values(array_filter($want, fn(string $w): bool => !isset($listed[pfTableEntry($w)]))),
+        'removed' => array_values(array_filter($current, fn(string $c): bool => !isset($wanted[$c]))),
+    ];
+}
+
+/**
  * The valid IPv4 ranges in a downloaded list: unique, in input order.
  *
  * One range per line. Blanks, # comments, IPv6 and anything else are skipped, so
- * a list that grows other kinds of line still parses. A page with markup in it
- * is not a list at all - an error page can have a line that looks like an
- * address - so any '<' discards the whole text.
+ * a list that grows other kinds of line still parses, and so is a range wider than
+ * a /8, which no one service owns. A page with markup in it is not a list at all -
+ * an error page can have a line that looks like an address - so any '<' discards
+ * the whole text.
  *
  * @return list<string>
  */
@@ -113,7 +179,7 @@ function parseRanges(string $text): array
     $ranges = [];
     foreach (explode("\n", $text) as $line) {
         $line = trim($line);
-        if (isIpv4Cidr($line)) {
+        if (isIpv4Cidr($line) && (int)(explode('/', $line)[1] ?? 32) >= 8) {
             $ranges[$line] = true;
         }
     }
@@ -229,9 +295,10 @@ function destinationSet(array $learned, array $published, array $appleRanges, ar
  * @param callable(string): (list<string>|false) $lookup one host's addresses, or
  *        false when the lookup itself failed
  * @param callable(): int                        $nowMs milliseconds from any origin
- * @return array{addresses: list<string>, skipped: list<string>, failed: list<string>}
+ * @return array{addresses: list<string>, skipped: list<string>, failed: list<string>, answers: array<string, list<string>>}
  *         addresses are IPv4 only, sorted and unique; skipped ran out of time;
- *         failed returned false
+ *         failed returned false; answers holds each other host's own addresses,
+ *         the same way, possibly none
  */
 function resolveAll(array $hosts, callable $lookup, int $budgetMs, callable $nowMs): array
 {
@@ -239,6 +306,7 @@ function resolveAll(array $hosts, callable $lookup, int $budgetMs, callable $now
     $addresses = [];
     $skipped = [];
     $failed = [];
+    $answers = [];
     $spent = false;
     foreach ($hosts as $host) {
         $spent = $spent || ($nowMs() - $start >= $budgetMs);
@@ -251,15 +319,40 @@ function resolveAll(array $hosts, callable $lookup, int $budgetMs, callable $now
             $failed[] = $host;
             continue;
         }
+        $own = [];
         foreach ($found as $ip) {
             if (isIpv4($ip)) {
-                $addresses[] = $ip;
+                $own[] = $ip;
             }
         }
+        $own = array_unique($own);
+        sort($own, SORT_STRING);
+        $answers[$host] = $own;
+        $addresses = array_merge($addresses, $own);
     }
     $addresses = array_unique($addresses);
     sort($addresses, SORT_STRING);
-    return ['addresses' => $addresses, 'skipped' => $skipped, 'failed' => $failed];
+    return ['addresses' => $addresses, 'skipped' => $skipped, 'failed' => $failed, 'answers' => $answers];
+}
+
+/**
+ * The addresses in one name's dns_get_record() answer that may be learned: the
+ * public IPv4 ones (isPublicIpv4()), in answer order. A record without one is
+ * skipped.
+ *
+ * @param array<mixed> $records
+ * @return list<string>
+ */
+function answerAddresses(array $records): array
+{
+    $addresses = [];
+    foreach ($records as $record) {
+        $ip = is_array($record) ? ($record['ip'] ?? null) : null;
+        if (is_string($ip) && isPublicIpv4($ip)) {
+            $addresses[] = $ip;
+        }
+    }
+    return $addresses;
 }
 
 /**
@@ -288,33 +381,85 @@ function messagingHosts(array $apps, array $notifications): array
 /**
  * The learned set after this run.
  *
- * The cached addresses go through filterCandidates() again, with the addresses the
- * protected names gave this run, and whatever it drops leaves the set: the guard can
+ * The cached addresses go through filterCandidates() again, with the protected
+ * addresses this run knows, and whatever it drops leaves the set: the guard can
  * change under an address learned earlier, as when a protected name starts
  * resolving to it or a plugin update widens the CDN list, and a protected address
  * must not stay blocked for the week a learned address lives.
  *
  * This run's answers that pass the same filter are learned (mergeLearned()), but
- * only when every protected name was answered. A protected name that failed, or
- * had no time left, may share an address with an app, and nothing tells which: then
- * nothing new is learned and the rest of the set stays as it is, unstamped and
- * unexpired, until a run whose guard is complete.
+ * only when no protected name is missing. A protected name with no answer, this run
+ * or a recent one, may share an address with an app, and nothing tells which: then
+ * nothing new is learned and nothing is stamped again, while addresses not seen
+ * for the maximum age still expire.
  *
  * @param array<string, int> $learned address => time last seen, from the cache
  * @param array<string>      $fresh   this run's answers
- * @param array{addresses: list<string>, skipped: list<string>, failed: list<string>} $guard
- *        resolveAll() of the protected names
+ * @param array{addresses: list<string>, missing: list<string>} $guard protectedGuard()
  * @param array<string>      $cdnRanges IPv4 CIDRs of shared CDNs
  * @return array<string, int>
  */
 function updateLearned(array $learned, array $fresh, array $guard, array $cdnRanges, int $now, int $maxAge): array
 {
     $dropped = filterCandidates(array_keys($learned), $guard['addresses'], $cdnRanges)['dropped'];
-    $learned = array_diff_key($learned, $dropped);
-    if ($guard['failed'] !== [] || $guard['skipped'] !== []) {
-        return $learned;
+    $kept = $guard['missing'] === [] ? filterCandidates($fresh, $guard['addresses'], $cdnRanges)['kept'] : [];
+    return mergeLearned(array_diff_key($learned, $dropped), $kept, $now, $maxAge);
+}
+
+/**
+ * The protected addresses to filter by this run, and the answers to keep.
+ *
+ * A protected name answered this run, even with nothing, replaces what was kept for
+ * it. One that failed or ran out of time falls back to its kept answer while that is
+ * at most $maxAge seconds old. A name with neither is missing: its addresses are
+ * unknown, so updateLearned() learns nothing new this run. A name no longer
+ * protected is forgotten.
+ *
+ * @param list<string>                $names   the protected names
+ * @param array<string, list<string>> $answers resolveAll()'s answers for them
+ * @param array<string, array{addresses: list<string>, seen: int}> $memory the kept answers
+ * @return array{addresses: list<string>, missing: list<string>, memory: array<string, array{addresses: list<string>, seen: int}>}
+ *         the addresses to filter by, sorted and unique; the names with no answer,
+ *         in list order; and the answers to keep
+ */
+function protectedGuard(array $names, array $answers, array $memory, int $now, int $maxAge): array
+{
+    $addresses = [];
+    $missing = [];
+    $kept = [];
+    foreach ($names as $name) {
+        $entry = isset($answers[$name]) ? ['addresses' => $answers[$name], 'seen' => $now] : ($memory[$name] ?? null);
+        if ($entry !== null) {
+            $kept[$name] = $entry;
+        }
+        if ($entry === null || $entry['seen'] < $now - $maxAge) {
+            $missing[] = $name;
+        } else {
+            $addresses = array_merge($addresses, $entry['addresses']);
+        }
     }
-    return mergeLearned($learned, filterCandidates($fresh, $guard['addresses'], $cdnRanges)['kept'], $now, $maxAge);
+    $addresses = array_unique($addresses);
+    sort($addresses, SORT_STRING);
+    return ['addresses' => $addresses, 'missing' => $missing, 'memory' => $kept];
+}
+
+/**
+ * The learned set to start this run from: empty when an app selected at the last
+ * refresh is no longer selected, else as it was.
+ *
+ * The set does not record which app an address came from, so taking an app's
+ * servers out means learning again from nothing; the names still selected are
+ * looked up again in the same run. Adding an app, or a cache from before the
+ * selection was kept, changes nothing.
+ *
+ * @param array<string, int> $learned  address => time last seen
+ * @param ?array<string>     $lastApps the app ids of the last refresh, null when unknown
+ * @param array<string>      $apps     this run's app ids
+ * @return array<string, int>
+ */
+function learnedForSelection(array $learned, ?array $lastApps, array $apps): array
+{
+    return $lastApps !== null && array_diff($lastApps, $apps) !== [] ? [] : $learned;
 }
 
 /**
@@ -394,23 +539,38 @@ function refreshPublished(
  *
  * The file is the plugin's own, but a damaged copy must neither put a wrong entry
  * in a pf table nor stop the refresh, so each entry is judged on its own and a bad
- * one is dropped, as if it had never been there: a learned entry needs an IPv4
- * address and an integer time, a published one a list of IPv4 ranges, an integer
- * time and, if it has one, an integer failure time. Anything but an array is an
- * empty cache.
+ * one is dropped, as if it had never been there: a learned entry needs a public
+ * IPv4 address (isPublicIpv4()) and an integer time; a published one a list of IPv4
+ * ranges, an integer time and, if it has one, an integer failure time; a protected
+ * name's a list of public IPv4 addresses and an integer time. The apps of the last
+ * refresh must be a list of ids, or they are unknown (null). Anything but an array
+ * is an empty cache.
  *
  * @param mixed $raw the file's JSON, decoded to arrays
- * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>}
+ * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>}
  */
 function sanitizeCache(mixed $raw): array
 {
     $raw = is_array($raw) ? $raw : [];
     $learned = [];
     foreach ((array)($raw['learned'] ?? []) as $ip => $seen) {
-        if (isIpv4((string)$ip) && is_int($seen)) {
+        if (isPublicIpv4((string)$ip) && is_int($seen)) {
             $learned[$ip] = $seen;
         }
     }
+    $protected = [];
+    foreach ((array)($raw['protected'] ?? []) as $name => $entry) {
+        if (!is_array($entry) || !is_int($entry['seen'] ?? null) || !is_array($entry['addresses'] ?? null)
+            || !array_is_list($entry['addresses'])) {
+            continue;
+        }
+        $addresses = array_filter($entry['addresses'], fn($a): bool => is_string($a) && isPublicIpv4($a));
+        if ($addresses === $entry['addresses']) {
+            $protected[$name] = ['addresses' => $addresses, 'seen' => $entry['seen']];
+        }
+    }
+    $apps = $raw['apps'] ?? null;
+    $apps = is_array($apps) && array_is_list($apps) && $apps === array_filter($apps, 'is_string') ? $apps : null;
     $published = [];
     foreach ((array)($raw['published'] ?? []) as $id => $entry) {
         $failedAt = is_array($entry) ? ($entry['failed_at'] ?? null) : null;
@@ -428,9 +588,39 @@ function sanitizeCache(mixed $raw): array
     return [
         'learned' => $learned,
         'published' => $published,
+        'protected' => $protected,
+        'apps' => $apps,
         'refreshed_at' => is_int($raw['refreshed_at'] ?? null) ? $raw['refreshed_at'] : null,
         'errors' => is_array($errors) ? array_values(array_filter($errors, 'is_string')) : [],
     ];
+}
+
+/**
+ * What a refresh reports, worded as status shows it: first that learning is paused,
+ * naming the protected names with no answer, since status shows only the first few;
+ * then, for each lookup run in the order given, the names that failed and those that
+ * ran out of time; then each app whose list download failed.
+ *
+ * @param list<array{failed: list<string>, skipped: list<string>}> $lookups resolveAll() results
+ * @param array<string> $failedDownloads app ids
+ * @param array<string> $unanswered      protectedGuard()'s missing names
+ * @return list<string>
+ */
+function refreshErrors(array $lookups, array $failedDownloads, array $unanswered): array
+{
+    $errors = $unanswered === [] ? [] : ['learning paused: no answer for ' . implode(', ', $unanswered)];
+    foreach ($lookups as $result) {
+        foreach ($result['failed'] as $host) {
+            $errors[] = "lookup failed: $host";
+        }
+        foreach ($result['skipped'] as $host) {
+            $errors[] = "lookup skipped (time budget): $host";
+        }
+    }
+    foreach ($failedDownloads as $app) {
+        $errors[] = "range download failed: $app";
+    }
+    return $errors;
 }
 
 /**
@@ -464,6 +654,37 @@ function selectStatesToDrop(array $records, array $destinations, int $portLo, in
         }
     }
     return array_values(array_unique($ids));
+}
+
+/**
+ * Which open connections of one device in the device table to drop this run, as
+ * selectStatesToDrop()'s destinations and port range; null when none.
+ *
+ * A device that entered the table this run loses its connections to every server in
+ * $dest and to the notification ports $portLo..$portHi. One that was there already
+ * loses only those to the servers added this run (1..0 holds no port), and nothing
+ * when none were added.
+ *
+ * @param array<string> $added     the device-table entries added this run
+ * @param array<string> $dest      this run's servers
+ * @param array<string> $addedDest the servers added this run
+ * @return ?array{destinations: array<string>, portLo: int, portHi: int}
+ */
+function dropPlan(string $target, array $added, array $dest, array $addedDest, int $portLo, int $portHi): ?array
+{
+    if (in_array($target, $added, true)) {
+        return ['destinations' => $dest, 'portLo' => $portLo, 'portHi' => $portHi];
+    }
+    return $addedDest === [] ? null : ['destinations' => $addedDest, 'portLo' => 1, 'portHi' => 0];
+}
+
+/**
+ * Did `filter kill state` run? pfctl answers "killed N states ...", whatever N is;
+ * anything else, an empty answer from configd included, is a failure to report.
+ */
+function stateKilled(string $response): bool
+{
+    return str_starts_with($response, 'killed');
 }
 
 /**
