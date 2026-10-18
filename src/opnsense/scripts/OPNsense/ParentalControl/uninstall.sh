@@ -20,8 +20,10 @@ ACTIONS=/usr/local/opnsense/service/conf/actions.d
 DATA=/var/db/parentalcontrol            # DATA_DIR in lib/markers.php
 
 echo "removing firewall objects and the cron job"
-# It says why when it stops; the files stay, so it can be run again.
-"$SCRIPTS/uninstall.php" || { echo "stopped: no file was removed" >&2; exit 1; }
+# --final: the files go next, so it also leaves the marker that stops any sync
+# from putting the objects back. It says why when it stops; the files stay, so
+# it can be run again.
+"$SCRIPTS/uninstall.php" --final || { echo "stopped: no file was removed" >&2; exit 1; }
 
 echo "removing files"
 rm -f "$WWW/ParentalControl.js" "$WWW/Metadata/ParentalControl.xml"

@@ -40,7 +40,8 @@ const NOTIFY_PORTS   = NOTIFY_PORT_LO . '-' . NOTIFY_PORT_HI;
 /* The plugin's own state (the learned server list), kept out of config.xml. */
 const DATA_DIR = '/var/db/parentalcontrol';
 
-/* Left by a successful uninstall until the next install removes it. While it
-   exists a sync changes nothing, so a sync that waited for uninstall's lock
-   cannot put back what uninstall removed. install.sh names the same path. */
+/* Left by a successful `uninstall.php --final` (uninstall.sh's run) until the
+   next install removes it. While it exists a sync changes nothing, so a sync that
+   waited for uninstall's lock cannot put back what uninstall removed. install.sh
+   names the same path. */
 const UNINSTALL_MARKER = DATA_DIR . '/uninstalling';

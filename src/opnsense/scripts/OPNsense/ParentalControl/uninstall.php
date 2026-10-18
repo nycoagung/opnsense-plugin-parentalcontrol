@@ -17,8 +17,10 @@
  * owner. Everything is matched by description marker, so a renamed alias is
  * still found.
  *
- * A run that removes everything leaves UNINSTALL_MARKER behind: until the next
- * install, every sync then changes nothing.
+ * With --final, as uninstall.sh runs it before removing the files, a run that
+ * removes everything also leaves UNINSTALL_MARKER behind: until the next install,
+ * every sync then changes nothing. Without it, as the configd action runs it, only
+ * the configuration side goes, and the next sync puts it all back.
  *
  * Idempotent: safe to run when some or all of it is already gone.
  */
@@ -31,6 +33,13 @@ use OPNsense\Core\Config;
 use OPNsense\Cron\Cron;
 use OPNsense\Firewall\Alias;
 use OPNsense\Firewall\Filter;
+
+$args = isset($argv) ? array_slice($argv, 1) : [];
+if ($args !== [] && $args !== ['--final']) {
+    fwrite(STDERR, "usage: uninstall.php [--final]\n");
+    exit(1);
+}
+$final = $args === ['--final'];
 
 foreach (['markers.php', 'messaging.php'] as $lib) {
     /* an older installer's file list leaves out the files added since */
@@ -47,20 +56,22 @@ foreach (['markers.php', 'messaging.php'] as $lib) {
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0700);         /* a sync starting at the same moment may make it first */
 }
-/* The marker goes down before the lock is taken, so a sync that gets the lock
-   next changes nothing. Any exit before everything is removed takes it away
-   again: a refusal changed nothing, and a run that failed part way must not stop
-   the syncs that would put the rest back. */
-if (!@touch(UNINSTALL_MARKER)) {
-    fwrite(STDERR, "not removing anything: cannot create " . UNINSTALL_MARKER . "\n");
-    exit(1);
-}
-$cleanUp = [UNINSTALL_MARKER];      /* removed at exit, unless the run gets to the end */
-register_shutdown_function(function () use (&$cleanUp): void {
-    foreach ($cleanUp as $file) {
-        @unlink($file);
+/* With --final the marker goes down before the lock is taken, so a sync that gets
+   the lock next changes nothing. Any exit before everything is removed takes it
+   away again: a refusal changed nothing, and a run that failed part way must not
+   stop the syncs that would put the rest back. */
+if ($final) {
+    if (!@touch(UNINSTALL_MARKER)) {
+        fwrite(STDERR, "not removing anything: cannot create " . UNINSTALL_MARKER . "\n");
+        exit(1);
     }
-});
+    $cleanUp = [UNINSTALL_MARKER];  /* removed at exit, unless the run gets to the end */
+    register_shutdown_function(function () use (&$cleanUp): void {
+        foreach ($cleanUp as $file) {
+            @unlink($file);
+        }
+    });
+}
 $lock = @fopen(DATA_DIR . '/sync.lock', 'c');
 if ($lock === false) {
     fwrite(STDERR, "cannot open " . DATA_DIR . "/sync.lock\n");
@@ -171,6 +182,6 @@ if (!empty($ruleUuids) || !empty($aliasUuids)) {
 if (!empty($jobUuids)) {
     $backend->configdRun('cron restart');
 }
-$cleanUp = [];                  /* everything is removed: the marker stays */
+$cleanUp = [];                  /* everything is removed: a --final run's marker stays */
 
 echo empty($removed) ? "nothing to remove\n" : implode("\n", $removed) . "\n";
