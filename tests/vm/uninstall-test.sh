@@ -38,11 +38,17 @@
 # Beyond the plugin's own files, settings and objects it changes:
 #   - /etc/resolv.conf, for one check;
 #   - one firewall rule of its own, added and deleted again (the refusal check);
-#   - background helpers: lock holders and idle connections.
+#   - background helpers: lock holders, idle connections and uninstall runs.
 # The VM's own address is a test device for one check, and the installer and
-# uninstaller restart configd. The EXIT trap puts resolv.conf back and stops the
-# helpers, also on Ctrl-C. At the end config.xml is compared with the copy saved
-# at the start. Work files, including that copy, stay in /tmp/pctest.
+# uninstaller restart configd. At the end config.xml is compared with the copy
+# saved at the start. Work files, including that copy, stay in /tmp/pctest.
+#
+# The EXIT trap, which also runs on Ctrl-C, puts resolv.conf back, deletes the
+# test's own firewall rule if it is still there, and stops the helpers. An
+# uninstall.sh running in the background is not killed: the trap stops the
+# uninstall.php it started, and uninstall.sh then ends by itself. An interrupted
+# run otherwise leaves the plugin as the current check had it; preflight wants a
+# clean VM, so start again from one.
 #
 # configd hides a script's stderr and exit status: it answers "Error (1)" or
 # "Execute error". So wherever a check needs a message or an exit code, it runs
@@ -155,23 +161,53 @@ installed_install() {
     : > "$W/fetch.log"
     PATH="$W/bin:$PATH" FAKE_TGZ="$1" FAKE_FETCH_FAIL="${2:-}" sh "$SCRIPTS/install.sh" 2>&1
 }
+# Install the tree again, once, if a check left the files broken or the marker
+# behind, so later sections start from a working install. Called after the
+# checks, which have recorded the failure.
+repair() {
+    if [ -n "$(missing_files)" ] || [ -e "$MARKER" ] || ! cmp -s "$SCRIPTS/install.sh" "$TREE/install.sh"; then
+        sh "$TREE/install.sh" > /dev/null 2>&1
+    fi
+}
 
 # ---- background helpers and the trap ----------------------------------------
 
-BG=
-HOLDER=
+# The helpers that may still be running, as " pid pid ". A PID leaves the list
+# once its process has been waited for: after that, the PID can be reused.
+BG=' '
+HOLDER=                     # the current lock holder
+USH=                        # an uninstall.sh running in the background (8b)
+RULE=                       # the uuid of the test's own firewall rule while it exists
+track()  { BG="$BG$1 "; }
+forget() { case $BG in *" $1 "*) BG="${BG%% "$1" *} ${BG#* "$1" }" ;; esac; }
+reap()   { wait "$1"; _rc=$?; forget "$1"; return "$_rc"; }
+# one of this script's helpers, by its command line, so that a PID that now
+# belongs to some other process is never signalled
+ours()   { ps -p "$1" -o args= 2>/dev/null | grep -q -e 'pc\.php' -e 'ParentalControl'; }
+stop()   { ! ours "$1" || kill "$1" 2>/dev/null; reap "$1" 2>/dev/null; }
+
 hold_lock() {               # hold_lock SECONDS: stand in for a running sync
     rm -f "$W/held"
     $PC hold-lock "$1" "$W/held" &
     HOLDER=$!
-    BG="$BG $HOLDER"
+    track "$HOLDER"
     wait_file "$W/held" 60
 }
-release() { kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null; }
+release() { stop "$HOLDER"; }   # now, or after the holder has let go by itself
 
 # shellcheck disable=SC2329 # run by the EXIT trap
 cleanup() {
-    for _p in $BG; do kill "$_p" 2>/dev/null; done
+    # an uninstall.sh in the background: stop the uninstall.php it runs, whose own
+    # handler removes the marker. uninstall.sh then stops by itself or, if
+    # uninstall.php had already finished, completes the removal.
+    if [ -n "$USH" ]; then
+        for _c in $(pgrep -P "$USH" 2>/dev/null); do
+            ! ps -p "$_c" -o args= 2>/dev/null | grep -q 'uninstall\.php' || kill "$_c" 2>/dev/null
+        done
+        wait "$USH" 2>/dev/null
+    fi
+    for _p in $BG; do stop "$_p"; done
+    [ -z "$RULE" ] || $PC rule-del "$RULE" > /dev/null 2>&1
     if [ -f "$W/resolv.conf.orig" ]; then
         cp -p "$W/resolv.conf.orig" /etc/resolv.conf && rm -f "$W/resolv.conf.orig"
     fi
@@ -563,10 +599,7 @@ printf '%s\n' "$out" |
 [ "$(md5s)" = "$h0" ] || problem "installed files changed"
 [ "$(pcinst)" = "$before" ] || problem "left behind: $(pcinst)"
 verdict "handover: an archive missing a lib file changes nothing"
-# put the tree's files back if a check above left them broken
-if [ -n "$(missing_files)" ] || ! cmp -s "$SCRIPTS/install.sh" "$TREE/install.sh"; then
-    sh "$TREE/install.sh" > /dev/null 2>&1
-fi
+repair
 
 # 0.0.2's installer installs from its own list, which has no lib/: the first
 # upgrade must leave sync.php saying so, and the second must complete it
@@ -594,6 +627,7 @@ else
     s=$(csync)
     [ "$s" = OK ] || problem "sync: $s"
     verdict "upgrade from 0.0.2: a second install completes it"
+    repair
 fi
 
 # ---- 3. configure -------------------------------------------------------------
@@ -697,10 +731,12 @@ verdict "canonical targets: gone again with their devices"
 # rules match only packets coming in, so blocking that address cuts nothing else.
 # The target is Apple's notification service on 443, inside the shipped ranges,
 # so it is picked by destination; the control goes to a server outside the list.
+CONNS=
 conn() {                    # conn NAME HOST PORT: hold a connection; sets C_LOCAL and C_REMOTE
     rm -f "$W/conn-$1"
     $PC hold-conn "$2" "$3" 300 "$W/conn-$1" &
-    BG="$BG $!"
+    track "$!"
+    CONNS="$CONNS $!"
     wait_file "$W/conn-$1" 15 && read -r C_LOCAL C_REMOTE _rest < "$W/conn-$1" && [ "$C_LOCAL" != fail ]
 }
 if ! conn target courier.push.apple.com 443; then
@@ -735,26 +771,31 @@ else
     ! listed NoMessaging "$VMIP" || problem "$VMIP still in NoMessaging"
     verdict "drops: the VM's address leaves NoMessaging again"
 fi
-for _p in $BG; do kill "$_p" 2>/dev/null; done
+for _p in $CONNS; do stop "$_p"; done
 
 # A dead resolver must not hold a sync up: one try of one second per name, and
-# a time budget (lib/serverlist.php).
+# a time budget (lib/serverlist.php). resolv.conf is replaced only once a copy
+# is saved, which the trap also restores.
 calm
-cp -p /etc/resolv.conf "$W/resolv.conf.orig"
-printf 'nameserver 192.0.2.1\n' > /etc/resolv.conf
-t0=$(date +%s)
-out=$("$SCRIPTS/sync.php" 2>&1); rc=$?
-took=$(($(date +%s) - t0))
-ST=$(configctl parentalcontrol status 2>&1)
-cp -p "$W/resolv.conf.orig" /etc/resolv.conf && rm -f "$W/resolv.conf.orig"
-[ "$rc" = 0 ] || problem "exit $rc: $(oneline "$out")"
-[ "$took" -le 60 ] || problem "longer than 60 s"
-verdict "resolver down: sync exits 0 within 60 s (took $took s)"
-case $(sget messaging.errors) in
-    *"lookup failed: "*|*"lookup skipped (time budget): "*) ;;
-    *) problem "errors: $(sget messaging.errors)" ;;
-esac
-verdict "resolver down: status reports the failed lookups"
+if cp -p /etc/resolv.conf "$W/resolv.conf.orig"; then
+    printf 'nameserver 192.0.2.1\n' > /etc/resolv.conf
+    t0=$(date +%s)
+    out=$("$SCRIPTS/sync.php" 2>&1); rc=$?
+    took=$(($(date +%s) - t0))
+    ST=$(configctl parentalcontrol status 2>&1)
+    cp -p "$W/resolv.conf.orig" /etc/resolv.conf && rm -f "$W/resolv.conf.orig"
+    [ "$rc" = 0 ] || problem "exit $rc: $(oneline "$out")"
+    [ "$took" -le 60 ] || problem "longer than 60 s"
+    verdict "resolver down: sync exits 0 within 60 s (took $took s)"
+    case $(sget messaging.errors) in
+        *"lookup failed: "*|*"lookup skipped (time budget): "*) ;;
+        *) problem "errors: $(sget messaging.errors)" ;;
+    esac
+    verdict "resolver down: status reports the failed lookups"
+else
+    fail "resolver down: sync exits 0 within 60 s" "could not save a copy of /etc/resolv.conf, so it was left alone"
+    skip "resolver down: status reports the failed lookups" "no sync ran with the resolver down"
+fi
 calm
 csync > /dev/null                      # learn again through the working resolver
 
@@ -854,11 +895,11 @@ for sig in TERM HUP INT; do
     rm -f "$W/u.out"
     "$SCRIPTS/uninstall.php" --final > "$W/u.out" 2>&1 &
     upid=$!
-    BG="$BG $upid"
+    track "$upid"
     wait_file "$W/u.out" 5 "$WAITING" || problem "not waiting: $(oneline "$(cat "$W/u.out")")"
     [ -e "$MARKER" ] || problem "no marker while waiting"
     kill -s "$sig" "$upid"
-    wait "$upid"; rc=$?
+    reap "$upid"; rc=$?
     [ "$rc" = 1 ] || problem "exit $rc"
     [ ! -e "$MARKER" ] || problem "marker left"
     [ "$(md5 -q "$CONF")" = "$h0" ] || problem "config.xml changed"
@@ -876,6 +917,7 @@ hold_lock 5 || problem "could not take the lock"
 t0=$(date +%s)
 out=$("$SCRIPTS/uninstall.php" 2>&1); rc=$?
 took=$(($(date +%s) - t0))
+release
 [ "$rc" = 0 ] || problem "exit $rc: $(oneline "$out")"
 [ "$took" -ge 4 ] || problem "did not wait ($took s)"
 printf '%s\n' "$out" | grep -qxF "$WAITING" || problem "no line '$WAITING'"
@@ -925,10 +967,11 @@ hold_lock 5 || problem "could not take the lock"
 rm -f "$W/u.out"
 "$SCRIPTS/uninstall.php" --final > "$W/u.out" 2>&1 &
 upid=$!
-BG="$BG $upid"
+track "$upid"
 wait_file "$W/u.out" 4 "$WAITING" || problem "uninstall.php is not waiting"
 out=$("$SCRIPTS/sync.php" 2>&1); rc=$?
-wait "$upid"; urc=$?
+reap "$upid"; urc=$?
+release
 [ "$rc" = 0 ] || problem "exit $rc"
 [ "$out" = "$PAUSED" ] || problem "said: $(oneline "$out")"
 verdict "marker: a sync during uninstall --final changes nothing"
@@ -962,9 +1005,9 @@ calm
 rm -f "$W/u.out"
 "$SCRIPTS/uninstall.php" --final > "$W/u.out" 2>&1 &
 upid=$!
-BG="$BG $upid"
+track "$upid"
 sent=$($PC poll-signal "$upid")
-wait "$upid"; rc=$?
+reap "$upid"; rc=$?
 restore=
 if [ "$sent" = timeout ]; then
     fail "signal after the save" "config.xml never changed: $(oneline "$(cat "$W/u.out")")"
@@ -1012,7 +1055,10 @@ s=$(csync)
 in_place
 verdict "refusal: reinstalled, messaging on, sync answers OK"
 uuid=$($PC rule-add 'vm-test user rule' NoMessaging 2>&1)
-case $uuid in ''|*[!0-9a-f-]*) problem "not added: $(oneline "$uuid")" ;; esac
+case $uuid in
+    ''|*[!0-9a-f-]*) problem "not added: $(oneline "$uuid")" ;;
+    *) RULE=$uuid ;;                    # the trap deletes it if the run stops early
+esac
 verdict "refusal: a user's floating rule with source NoMessaging added"
 h0=$(md5 -q "$CONF")
 calm
@@ -1036,7 +1082,7 @@ s=$(csync)
 [ "$s" = OK ] || problem "sync: $s"
 in_place
 verdict "refusal: the next sync applies, everything in place"
-out=$($PC rule-del "$uuid" 2>&1) || problem "$(oneline "$out")"
+if out=$($PC rule-del "$uuid" 2>&1); then RULE=; else problem "$(oneline "$out")"; fi
 ! grep -qF 'vm-test user rule' "$CONF" || problem "still in config.xml"
 verdict "refusal: the user rule deleted"
 
@@ -1054,11 +1100,12 @@ calm
 hold_lock 5 || problem "could not take the lock"
 rm -f "$W/u.out"
 sh "$SCRIPTS/uninstall.sh" > "$W/u.out" 2>&1 &
-upid=$!
-BG="$BG $upid"
+USH=$!                      # not a helper the trap kills: see cleanup
 wait_file "$W/u.out" 4 "$WAITING" || problem "uninstall.php is not waiting"
 out=$("$SCRIPTS/sync.php" 2>&1); rc=$?
-wait "$upid"; urc=$?
+wait "$USH"; urc=$?
+USH=
+release
 [ "$rc" = 0 ] || problem "exit $rc"
 [ "$out" = "$PAUSED" ] || problem "said: $(oneline "$out")"
 verdict "uninstall during a sync: a sync that waited changes nothing"

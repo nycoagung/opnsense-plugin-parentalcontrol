@@ -50,13 +50,16 @@ If the plugin is already installed, its own installer can fetch the branch inste
 
 1. On the test device, open a chat in each of the five apps and leave it open.
 2. Under Settings, keep all five apps selected and press Save.
-3. Under Devices, edit the device at `<device-ip>`, set Messaging to Blocked, save,
-   then press Apply.
+3. Under Devices, edit the device at `<device-ip>`. Set Mode to Always allowed, so
+   that its internet schedule cannot cut everything and make a check pass or fail
+   for the wrong reason. Set Messaging to Blocked, save, then press Apply.
 
 - [ ] Status: the device's Messaging badge says blocked, with the reason
       "messaging always blocked".
-- [ ] The summary line says "Messaging: N server entries · not refreshed yet" at
-      first, then "Messaging: N server entries · refreshed HH:MM" within a minute.
+- [ ] Right after Apply, the summary line says "Messaging: N server entries ·
+      refreshed HH:MM": Apply runs a sync, which refreshes the list. "not refreshed
+      yet" appears only on the first use, between saving the device and pressing
+      Apply, or for up to a minute when the device was changed some other way.
 - [ ] `pfctl -t NoMessaging -T show` lists `<device-ip>`.
 
 ## 4 Each app, while blocked
@@ -111,7 +114,8 @@ Set the test device's Messaging to Not blocked and press Apply.
 ## 9 Follow schedule
 
 Set Messaging to "Blocked outside allowed hours". Make sure Days includes today, set
-Internet allowed from to now and until to `<window-end>`, and press Apply.
+Internet allowed from to now and until to `<window-end>`, and press Apply. Mode
+stays Always allowed, so the window steers only messaging, not the device's internet.
 
 - [ ] Before `<window-end>` the apps work.
 - [ ] Within a minute after `<window-end>` the apps are blocked and notifications
@@ -147,9 +151,13 @@ is back up:
 
 - [ ] At every step above, the Status tab agrees with what the device shows: the
       Messaging badge and reason for each device.
-- [ ] The summary line matches the situation: "not in use" when no enabled device
-      uses messaging, "not refreshed yet" in the first minute of use, and
-      "refreshed HH:MM" after that, followed by any lookup or download errors.
+- [ ] The summary line matches the situation, followed by any lookup or download
+      errors:
+      - "not in use" when no enabled device uses messaging;
+      - "refreshed HH:MM" once a sync has run while messaging is in use, which
+        Apply does at once;
+      - "not refreshed yet" only on the first use, before Apply or the next
+        minute's sync.
 
 ## 13 Config-side uninstall rehearsal
 
