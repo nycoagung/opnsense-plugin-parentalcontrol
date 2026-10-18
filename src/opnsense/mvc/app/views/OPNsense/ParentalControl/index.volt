@@ -148,7 +148,8 @@
                 $("#status-alias").text(data.alias + ' (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
                 var cron = {'enabled': '', 'disabled': "{{ lang._('schedule cron is disabled') }}",
                             'absent': "{{ lang._('schedule cron not installed') }}"}[data.cron] || '';
-                var warn = cron ? [cron] : [];
+                // a disabled plugin disables its own job: no warning then
+                var warn = cron && data.enabled ? [cron] : [];
                 if (data.ipv6_active) {
                     warn.push("{{ lang._('IPv6 is active - blocked devices keep IPv6 internet access') }}");
                 }

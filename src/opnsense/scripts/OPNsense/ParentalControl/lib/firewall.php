@@ -68,13 +68,18 @@ function tableContents(Backend $backend, string $alias): array
 
 /**
  * Make a pf table hold exactly $want, adding and deleting only the differences.
+ * With $add false it only deletes, and reports nothing added: `pfctl -T add` makes a
+ * table that does not exist, and such a table stays until it is killed.
  *
  * @param list<string> $want
  * @return array{added: list<string>, removed: list<string>}
  */
-function syncTable(Backend $backend, string $table, array $want): array
+function syncTable(Backend $backend, string $table, array $want, bool $add = true): array
 {
     $diff = tableDiff($want, tableContents($backend, $table));
+    if (!$add) {
+        $diff['added'] = [];
+    }
     foreach ($diff['added'] as $addr) {
         $backend->configdpRun('filter add table', [$table, $addr]);
     }

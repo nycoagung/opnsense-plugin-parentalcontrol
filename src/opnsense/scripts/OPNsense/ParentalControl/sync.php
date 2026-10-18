@@ -11,11 +11,11 @@
  * dashboard widget and the cron run, so none of them can disagree about what
  * is actually enforced.
  *
- * Enforcement is a single externally-managed alias plus a single floating block
- * rule. Toggling a device is a pf table update, which takes effect immediately
- * and needs no ruleset reload. Per-device rules were rejected: they do not
- * scale, they apply slowly, and arbitrary per-device schedules would need one
- * rule per distinct schedule.
+ * The internet switch is a single externally-managed alias plus a single
+ * floating block rule. Toggling a device is a pf table update, which takes
+ * effect immediately and needs no ruleset reload. Per-device rules were
+ * rejected: they do not scale, they apply slowly, and arbitrary per-device
+ * schedules would need one rule per distinct schedule.
  *
  * Messaging is blocked the same way, with objects of its own made on first use:
  * a table of the devices denied messaging, a table of the servers they may not
@@ -459,8 +459,8 @@ function messagingConflict(array $aliases): ?string
 /**
  * What is wrong with the messaging objects, or null when nothing is: first the
  * ones missing, then the aliases renamed in the GUI. Core repoints the rules to
- * a renamed alias, while the plugin keeps filling the table of the fixed name,
- * which nothing then uses. Only reads.
+ * a renamed alias, while the plugin fills only the table of the fixed name, and
+ * that only while its alias has that name. Only reads.
  *
  * @param list<array{name: string, description: string}> $aliases every alias
  * @param list<array{name: string, description: string}> $rules   every rule
@@ -556,7 +556,7 @@ foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
 }
 
 /* A renamed external alias means a renamed pf table, so the old one keeps its
-   entries and nothing references it any more. Remember it and flush it below,
+   entries and nothing references it any more. Remember it and remove it below,
    or every address blocked at the moment of the rename stays blocked. */
 $staleTable = null;
 
@@ -729,16 +729,28 @@ if ($msgError !== null) {
     fwrite(STDERR, "messaging: $msgError\n");
 }
 
+/* Entries go into a fixed-name table only while the plugin's own alias has that
+   name. After a rename by hand, or when the alias could not be made, `pfctl -T add`
+   would create the table itself, kept by pf, and uninstall, which finds the tables
+   by marker, would never remove it. Deletions still run. */
+$aliasRows = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
+$addTo = [];
+foreach (MSG_ALIASES as $name => $marker) {
+    $own = findByMarker($aliasRows, $marker);
+    $addTo[$name] = $own !== null && $own['name'] === $name;
+}
+
 if ($cfgChanged) {
     $backend->configdRun('filter reload');
 }
 
-/* The renamed-away table is no longer referenced by any rule, but its entries
-   survive in pf until something clears them. Flush it so a device blocked at
-   the moment of the rename is not left blocked by a table nobody maintains. */
+/* The renamed-away table is no longer referenced by any rule once the reload
+   above has run, but pf keeps it, entries and all, as it keeps every alias table.
+   Kill it, which empties and removes it, so a device blocked at the moment of the
+   rename is not left blocked by a table nobody maintains. */
 if ($staleTable !== null) {
-    $backend->configdpRun('filter delete table', [$staleTable, 'ALL']);
-    fwrite(STDERR, "alias renamed $staleTable -> $aliasName; flushed the old table\n");
+    $backend->configdpRun('filter kill table', [$staleTable]);
+    fwrite(STDERR, "alias renamed $staleTable -> $aliasName; removed the old table\n");
 }
 
 /* ---- sync the table ------------------------------------------------------ */
@@ -781,7 +793,14 @@ if ($msgObjectsOk && $msgInUse) {
         $cache = readCache(MSG_CACHE_FILE);
         /* an exception must not stop the device table below */
         try {
-            [$dest, $addedDest, $cache] = refreshServerList($backend, MSG_SERVERS_ALIAS, $data, $msgApps, $cache);
+            [$dest, $addedDest, $cache] = refreshServerList(
+                $backend,
+                MSG_SERVERS_ALIAS,
+                $data,
+                $msgApps,
+                $cache,
+                $addTo[MSG_SERVERS_ALIAS]
+            );
         } catch (\Throwable $e) {
             $cache['errors'] = ['refresh failed: ' . $e->getMessage()];
         }
@@ -799,7 +818,7 @@ if ($msgObjectsOk && $msgInUse) {
    Never under a conflict: that table belongs to someone else's alias. */
 if ($msgObjectsOk) {
     $msgWant = array_keys($msgBlockSet);
-    $msgDiff = syncTable($backend, MSG_DEVICES_ALIAS, $msgWant);
+    $msgDiff = syncTable($backend, MSG_DEVICES_ALIAS, $msgWant, $addTo[MSG_DEVICES_ALIAS]);
     printf(
         "messaging blocked=%d added=%d removed=%d\n",
         count($msgWant),

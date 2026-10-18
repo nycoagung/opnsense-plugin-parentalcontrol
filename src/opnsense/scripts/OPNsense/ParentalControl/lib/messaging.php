@@ -255,6 +255,53 @@ function choosePublished(array $fresh, array $lastGood, array $shipped): array
 }
 
 /**
+ * The apps' published ranges that may be blocked, and the ranges that hold a
+ * protected address.
+ *
+ * The guard on learned addresses (filterCandidates()) does not look inside a range, so
+ * this does. An app's range that holds an address a protected name resolves to is left
+ * out: blocking it would take that name down too. A notification range that holds one
+ * is kept, because denying messaging always cuts notifications, and is only reported.
+ * One error per range, naming the first protected address it holds.
+ *
+ * @param array<string, array<string>> $appRanges    app id => the ranges chosen for it
+ * @param array<string>                $notifyRanges the notification services' ranges
+ * @param array<string>                $protected    the protected addresses (protectedGuard())
+ * @return array{ranges: list<string>, errors: list<string>} the app ranges to block, in
+ *         input order, and the errors, the apps' first
+ */
+function filterRanges(array $appRanges, array $notifyRanges, array $protected): array
+{
+    $held = function (string $range) use ($protected): ?string {
+        foreach ($protected as $ip) {
+            if (ipv4InCidr($ip, $range)) {
+                return $ip;
+            }
+        }
+        return null;
+    };
+    $ranges = [];
+    $errors = [];
+    foreach ($appRanges as $app => $list) {
+        foreach ($list as $range) {
+            $ip = $held($range);
+            if ($ip === null) {
+                $ranges[] = $range;
+            } else {
+                $errors[] = "range $range of $app holds protected address $ip; not blocked";
+            }
+        }
+    }
+    foreach ($notifyRanges as $range) {
+        $ip = $held($range);
+        if ($ip !== null) {
+            $errors[] = "notification range $range holds protected address $ip";
+        }
+    }
+    return ['ranges' => $ranges, 'errors' => $errors];
+}
+
+/**
  * Every destination a device denied messaging may not reach: the learned
  * addresses, the published ranges and the notification services' ranges.
  *
@@ -488,9 +535,9 @@ function rangesDue(?array $entry, int $now, int $maxAge, int $retryAfter): bool
  *        ranges is empty
  * @param callable(string): (string|false) $fetch the body at a URL, or false when
  *        the download failed
- * @return array{ranges: array<string>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, failed: list<string>}
- *         every app's ranges together, the downloads after this run, and the ids of
- *         the apps whose last download failed
+ * @return array{ranges: array<string, array<string>>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, failed: list<string>}
+ *         each app's ranges, by id, the downloads after this run, and the ids of the
+ *         apps whose last download failed
  */
 function refreshPublished(
     array $apps,
@@ -522,7 +569,7 @@ function refreshPublished(
             }
             $lastGood = $entry['ranges'] ?? [];
         }
-        $ranges = array_merge($ranges, choosePublished($fresh, $lastGood, $app['ranges'] ?? []));
+        $ranges[$id] = choosePublished($fresh, $lastGood, $app['ranges'] ?? []);
     }
     return ['ranges' => $ranges, 'published' => $published, 'failed' => $failed];
 }
@@ -733,7 +780,7 @@ const CONFIG_UNPARSED = 'config.xml could not be parsed';
  * cannot be run on counts as a hit, for the same reason.
  *
  * @param string        $configXml the whole of /conf/config.xml, root <opnsense>
- * @param array<string> $ownUuids  uuids of the plugin's own aliases and rules
+ * @param array<string> $ownUuids  uuids of the plugin's own aliases, rules and cron job
  * @param array<string> $names     the plugin's alias names
  * @return list<string> locations
  */

@@ -243,6 +243,28 @@ check('published: shipped fallback',
     choosePublished([], [], ['192.0.2.0/24']),
     ['192.0.2.0/24']);
 
+/* ---- filterRanges ---------------------------------------------------------- */
+
+/* The guard on learned addresses does not look inside a range, so this does: an
+   app's range that holds a protected address is left out, while a notification range
+   stays, since denying messaging always cuts notifications. Status says which. */
+check('in ranges: an app range holding a protected address is left out',
+    filterRanges(['telegram' => ['198.51.100.0/24', '203.0.113.0/24']], [], ['203.0.113.9']),
+    ['ranges' => ['198.51.100.0/24'],
+     'errors' => ['range 203.0.113.0/24 of telegram holds protected address 203.0.113.9; not blocked']]);
+check('in ranges: a notification range holding one is only reported',
+    filterRanges([], ['192.0.2.0/24', '198.51.100.0/24'], ['192.0.2.7']),
+    ['ranges' => [], 'errors' => ['notification range 192.0.2.0/24 holds protected address 192.0.2.7']]);
+/* .200 is just outside the /25, so a range one bit too wide would take it */
+check('in ranges: the rest pass, in input order',
+    filterRanges(['a' => ['198.51.100.0/25'], 'b' => ['192.0.2.0/24']], ['203.0.113.0/24'], ['198.51.100.200']),
+    ['ranges' => ['198.51.100.0/25', '192.0.2.0/24'], 'errors' => []]);
+check('in ranges: one error per range, naming its first protected address; apps first',
+    filterRanges(['a' => ['192.0.2.0/24']], ['192.0.2.0/25'], ['192.0.2.5', '192.0.2.9']),
+    ['ranges' => [],
+     'errors' => ['range 192.0.2.0/24 of a holds protected address 192.0.2.5; not blocked',
+                  'notification range 192.0.2.0/25 holds protected address 192.0.2.5']]);
+
 /* ---- destinationSet -------------------------------------------------------- */
 
 check('destinations: notification ranges always present',
@@ -490,7 +512,7 @@ $fetched = [];
 $answers = [$url => "198.51.100.0/24\n"];
 check('published: a list never downloaded is downloaded and kept with its time',
     [refreshPublished(['t' => $listed, 'n' => $unlisted], [], $now, $day, $hour, $fetch), $fetched],
-    [['ranges' => ['198.51.100.0/24', '203.0.113.0/28'],
+    [['ranges' => ['t' => ['198.51.100.0/24'], 'n' => ['203.0.113.0/28']],
       'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
       'failed' => []],
      [$url]]);
@@ -498,11 +520,11 @@ $fetched = [];
 check('published: a list a day old is not downloaded again',
     [refreshPublished(['t' => $listed], ['t' => ['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day]],
         $now, $day, $hour, $fetch)['ranges'], $fetched],
-    [['203.0.113.64/26'], []]);
+    [['t' => ['203.0.113.64/26']], []]);
 $fetched = [];
 check('published: a list more than a day old is downloaded again',
     [refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $hour, $fetch), $fetched],
-    [['ranges' => ['198.51.100.0/24'],
+    [['ranges' => ['t' => ['198.51.100.0/24']],
       'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
       'failed' => []],
      [$url]]);
@@ -510,15 +532,15 @@ check('published: a list more than a day old is downloaded again',
 $answers = [];
 check('published: a failed download keeps the last good list and notes the failure',
     refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $hour, $fetch),
-    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old + ['failed_at' => $now]], 'failed' => ['t']]);
+    ['ranges' => ['t' => ['203.0.113.64/26']], 'published' => ['t' => $old + ['failed_at' => $now]], 'failed' => ['t']]);
 $answers = [$url => "<html>\n198.51.100.0/24\n</html>"];
 check('published: a download with no ranges in it is a failed download',
     refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $hour, $fetch),
-    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old + ['failed_at' => $now]], 'failed' => ['t']]);
+    ['ranges' => ['t' => ['203.0.113.64/26']], 'published' => ['t' => $old + ['failed_at' => $now]], 'failed' => ['t']]);
 $answers = [];
 check('published: with no good download yet the shipped ranges are used',
     refreshPublished(['t' => $listed], [], $now, $day, $hour, $fetch),
-    ['ranges' => ['192.0.2.0/24'], 'published' => ['t' => ['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now]],
+    ['ranges' => ['t' => ['192.0.2.0/24']], 'published' => ['t' => ['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now]],
      'failed' => ['t']]);
 /* within the hour after a failure nothing is downloaded, and the failure stands */
 $fetched = [];
@@ -526,18 +548,18 @@ $answers = [$url => "198.51.100.0/24\n"];
 check('published: a failed list is not downloaded again within the hour',
     [refreshPublished(['t' => $listed], ['t' => $old + ['failed_at' => $now - 60]], $now, $day, $hour, $fetch),
      $fetched],
-    [['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old + ['failed_at' => $now - 60]], 'failed' => ['t']],
+    [['ranges' => ['t' => ['203.0.113.64/26']], 'published' => ['t' => $old + ['failed_at' => $now - 60]], 'failed' => ['t']],
      []]);
 check('published: a good download clears the failure',
     refreshPublished(['t' => $listed], ['t' => $old + ['failed_at' => $now - $hour]], $now, $day, $hour, $fetch),
-    ['ranges' => ['198.51.100.0/24'], 'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
+    ['ranges' => ['t' => ['198.51.100.0/24']], 'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
      'failed' => []]);
 /* a list, and a failure, kept from a version whose data still had the app's list address */
 $fetched = [];
 check('published: an app with no list address uses only its shipped ranges',
     [refreshPublished(['n' => $unlisted], ['n' => $old + ['failed_at' => $now - 60]], $now, $day, $hour, $fetch),
      $fetched],
-    [['ranges' => ['203.0.113.0/28'], 'published' => ['n' => $old + ['failed_at' => $now - 60]], 'failed' => []],
+    [['ranges' => ['n' => ['203.0.113.0/28']], 'published' => ['n' => $old + ['failed_at' => $now - 60]], 'failed' => []],
      []]);
 
 /* ---- sanitizeCache --------------------------------------------------------- */

@@ -68,6 +68,8 @@ if ($final) {
         pcntl_async_signals(true);
         foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
             pcntl_signal($signal, function (): void {
+                /* a second signal would otherwise end the clean-up below before it is done */
+                pcntl_async_signals(false);
                 exit(1);
             });
         }
@@ -153,6 +155,12 @@ if ($refs !== []) {
 }
 
 $backend = new Backend();
+/* configd answers '' when it is not running: nothing below would reach pf, and the
+   rules would stay loaded with their aliases gone */
+if ($backend->configdRun('filter list tables') === '') {
+    fwrite(STDERR, "not removing anything: configd is not answering\n");
+    exit(1);
+}
 $removed = [];
 
 /* 3. flush the pf tables first - after an alias is gone its table cannot be
@@ -193,7 +201,11 @@ if (!empty($ruleUuids) || !empty($aliasUuids) || !empty($jobUuids)) {
     Config::getInstance()->save();
 }
 if (!empty($ruleUuids) || !empty($aliasUuids)) {
-    $backend->configdRun('filter reload');
+    /* configd answers "OK" and two newlines when the reload ran */
+    if (trim($backend->configdRun('filter reload')) !== 'OK') {
+        echo "warning: the filter reload failed, so pf may still hold the plugin's rules and tables "
+            . "until the next filter reload: run 'configctl filter reload'\n";
+    }
 }
 /* 7. the emptied tables themselves. Core declares every alias table "persist", and
       its own clean-up skips external aliases, so pf keeps them until they are

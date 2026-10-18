@@ -46,7 +46,8 @@ function readCache(string $path): array
  * protected name has no answer, this run or a recent one, downloads each published
  * list once a day (an hour after a failed download at the soonest), and makes the
  * servers table hold the learned addresses, the published ranges and the
- * notification services' ranges. A failed lookup or download never empties the
+ * notification services' ranges. A published range that holds a protected address
+ * is left out (filterRanges()). A failed lookup or download never empties the
  * list: a learned address stays for a week, and a published list falls back to its
  * last good copy, then to the shipped one. Only taking an app out of the selection
  * starts the learned set again.
@@ -55,10 +56,11 @@ function readCache(string $path): array
  * @param array<string>        $apps  the selected app ids
  * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
  *        readCache()
+ * @param bool $add false to only delete from the table (syncTable())
  * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: list<string>, refreshed_at: int, errors: list<string>}}
  *         this run's servers, the ones the table gained, and the cache to write
  */
-function refreshServerList(Backend $backend, string $table, array $data, array $apps, array $cache): array
+function refreshServerList(Backend $backend, string $table, array $data, array $apps, array $cache, bool $add): array
 {
     /* one try of one second per name, so a dead resolver spends the budget on
        many names rather than the default several seconds on each */
@@ -75,7 +77,8 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
     $found = resolveAll(messagingHosts($selected, $data['notifications']), $lookup, 20000, $nowMs);
     $answered = resolveAll($data['protected_hosts'], $lookup, 10000, $nowMs);
     $now = time();
-    /* stamped with the hour, so the cache changes only when an answer does */
+    /* stamped with the hour, so the learned and protected sections change only when an
+       answer does; the file itself is rewritten on every refresh, for its refresh time */
     $hour = intdiv($now, 3600) * 3600;
     $guard = protectedGuard($data['protected_hosts'], $answered['answers'], $cache['protected'], $hour, 7 * 86400);
     $learned = updateLearned(
@@ -96,13 +99,19 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
         fn(string $url) => @file_get_contents($url, false, $context)
     );
 
+    $ranges = filterRanges(
+        $published['ranges'],
+        array_merge($data['notifications']['apple_ranges'], $data['notifications']['microsoft_ranges']),
+        $guard['addresses']
+    );
+
     $dest = destinationSet(
         $learned,
-        $published['ranges'],
+        $ranges['ranges'],
         $data['notifications']['apple_ranges'],
         $data['notifications']['microsoft_ranges']
     );
-    $diff = syncTable($backend, $table, $dest);
+    $diff = syncTable($backend, $table, $dest, $add);
     printf("messaging servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
 
     return [$dest, $diff['added'], [
@@ -111,7 +120,10 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
         'protected' => $guard['memory'],
         'apps' => $selectedIds,
         'refreshed_at' => time(),
-        'errors' => refreshErrors([$found, $answered], $published['failed'], $guard['missing']),
+        'errors' => array_merge(
+            refreshErrors([$found, $answered], $published['failed'], $guard['missing']),
+            $ranges['errors']
+        ),
     ]];
 }
 
