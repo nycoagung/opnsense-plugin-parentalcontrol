@@ -171,10 +171,11 @@ filter, depending on nothing outside OPNsense core:
   cannot be resolved and nothing recent is remembered for it, learning pauses: the
   plugin cannot tell whether an address it finds is shared with that name, so it
   learns nothing new until the name resolves again, and Status says "learning
-  paused: no answer for …". The guard also looks inside ranges: a published range
-  that holds a protected name's address is left out ("range … holds protected
-  address …; not blocked"), while a notification range that holds one stays
-  blocked, because the notification cut wins, and Status names it too.
+  paused: no answer for …". The guard also looks inside ranges: an app's
+  published range (Telegram's) that holds a protected name's address is left out
+  ("range … holds protected address …; not blocked"), while a notification range
+  that holds one stays blocked, because the notification cut wins, and Status
+  names it too.
 
 A change takes effect on Apply or within the one-minute cycle.
 
@@ -486,9 +487,9 @@ the pre-fix logic, which they fail on 4 cases. The counts reported for the rest:
 24, 50, 65, 128 and 8 broken copies of the library, at the five stages
 `MessagingTest.php` was built in; 31 of the data file and 23 of the model for
 `MessagingDataTest.php`, whose alias-name check was also shown failing against the
-old pattern; and 5 of the generator for `BuildMessagingDataTest.py`. The last round
-of fixes added 11 broken copies of the library and 8 of the data file, the model
-and the rule's ports, every one caught. In the first three library stages each of
+old pattern; and 5 of the generator for `BuildMessagingDataTest.py`. Later checks
+added 11 broken copies of the library and 8 of the data file, the model and the
+rule's ports, every one caught. In the first three library stages each of
 the 89 checks was shown failing under at least one broken copy. Every broken copy
 was caught except seven in `MessagingTest.php`: five behave the same as the
 original on every input that can occur, and two fold the case of alias names,

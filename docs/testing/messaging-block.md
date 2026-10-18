@@ -173,6 +173,10 @@ is back up:
       - "not refreshed yet" only on the first use, before Apply or the next
         minute's sync, together with a red "messaging objects missing: …",
         which is expected until that sync creates them.
+- [ ] If the errors include "notification range … holds protected address …",
+      note the range and the address: that notification range stays blocked by
+      design (the notification cut wins), so check whether the protected service
+      it names (for example iCloud) still works on the blocked device.
 
 ## 13 Config-side uninstall rehearsal
 
