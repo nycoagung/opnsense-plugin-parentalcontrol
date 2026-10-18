@@ -622,7 +622,7 @@ function messagingData(): ?array
  * the last refresh's time and errors. A missing or damaged file reads as empty,
  * entry by entry (sanitizeCache()).
  *
- * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>}
+ * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>}
  */
 function readCache(): array
 {
@@ -904,9 +904,10 @@ printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), 
 /**
  * Refresh the server list and load it into its table.
  *
- * Resolves the selected apps' names and the notification services' names, learns
- * the answers that the guard (protected names, shared CDNs) lets through,
- * downloads each published list once a day, and makes the servers table hold the
+ * Resolves the notification services' names and the selected apps' names, learns
+ * the answers that the guard (protected names, shared CDNs) lets through when every
+ * protected name was answered, downloads each published list once a day (an hour
+ * after a failed download at the soonest), and makes the servers table hold the
  * learned addresses, the published ranges and the notification services' ranges.
  * A failed lookup or download never empties the list: a learned address stays for
  * a week, and a published list falls back to its last good copy, then to the
@@ -914,9 +915,9 @@ printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), 
  *
  * @param array<string, mixed> $data  messaging.json
  * @param array<string>        $apps  the selected app ids
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>} $cache
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>} $cache
  *        readCache()
- * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: int, errors: list<string>}}
+ * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: int, errors: list<string>}}
  *         this run's servers, the ones the table gained, and the cache to write
  */
 function refreshServerList(Backend $backend, array $data, array $apps, array $cache): array
@@ -938,7 +939,7 @@ function refreshServerList(Backend $backend, array $data, array $apps, array $ca
     $learned = updateLearned(
         $cache['learned'],
         $found['addresses'],
-        $guard['addresses'],
+        $guard,
         $data['shared_cdn_ranges'],
         intdiv($now, 3600) * 3600,
         7 * 86400
@@ -949,6 +950,7 @@ function refreshServerList(Backend $backend, array $data, array $apps, array $ca
         $cache['published'],
         $now,
         86400,
+        3600,
         fn(string $url) => @file_get_contents($url, false, $context)
     );
 
@@ -986,7 +988,7 @@ function refreshServerList(Backend $backend, array $data, array $apps, array $ca
  * file rather than half a new one. A failure goes to STDERR; the next run writes
  * it again.
  *
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>} $cache
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, refreshed_at: ?int, errors: list<string>} $cache
  */
 function writeCache(array $cache): void
 {

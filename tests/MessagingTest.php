@@ -269,40 +269,89 @@ check('resolve: addresses sorted',
 
 /* ---- messagingHosts -------------------------------------------------------- */
 
-/* y.example is under both apps and z.example also among the notification names */
-$hostApps = ['a' => ['hosts' => ['x.example', 'y.example']], 'b' => ['hosts' => ['y.example', 'z.example']]];
+/* y.example is under both apps and z.example also among the notification names;
+   w.example comes after both repeats */
+$hostApps = ['a' => ['hosts' => ['x.example', 'y.example']],
+             'b' => ['hosts' => ['y.example', 'z.example', 'w.example']]];
 $notify = ['google_hosts' => ['z.example', 'g.example'], 'microsoft_hosts' => ['m.example']];
-check('hosts: the apps\' names, then the notification names, each once',
+/* a slow resolver skips the end of the list, and notifications are cut whichever
+   apps are selected, so their names lead */
+check('hosts: the notification names, then the apps\' names, each once',
     messagingHosts($hostApps, $notify),
-    ['x.example', 'y.example', 'z.example', 'g.example', 'm.example']);
-/* notifications are cut whichever apps are selected, even none */
+    ['z.example', 'g.example', 'm.example', 'x.example', 'y.example', 'w.example']);
 check('hosts: with no app selected the notification names are still looked up',
     messagingHosts([], $notify),
     ['z.example', 'g.example', 'm.example']);
 
 /* ---- updateLearned --------------------------------------------------------- */
 
+/* resolveAll() of the protected names: all answered; one failed; one out of time */
+$guarded = fn(array $addresses): array => ['addresses' => $addresses, 'skipped' => [], 'failed' => []];
+$failedGuard = ['addresses' => ['198.51.100.7'], 'skipped' => [], 'failed' => ['p.example']];
+$skippedGuard = ['addresses' => ['198.51.100.7'], 'skipped' => ['p.example'], 'failed' => []];
+
 /* The guard can change under an address learned earlier: a protected name may start
    resolving to it, or an update may widen the CDN list. Either must take it out of
    the list now, not when it expires a week later. */
 check('learned: a protected name now resolving to a learned address takes it out',
     updateLearned(['198.51.100.7' => $now - $day, '198.51.100.8' => $now - $day], [],
-        ['198.51.100.7'], [], $now, $maxAge),
+        $guarded(['198.51.100.7']), [], $now, $maxAge),
     ['198.51.100.8' => $now - $day]);
 check('learned: a wider CDN list takes a learned address out',
     updateLearned(['198.51.100.7' => $now - $day, '203.0.113.9' => $now - $day], [],
-        [], ['198.51.100.0/24'], $now, $maxAge),
+        $guarded([]), ['198.51.100.0/24'], $now, $maxAge),
     ['203.0.113.9' => $now - $day]);
 /* .7 is protected and .5 a CDN address, so neither is learned; .9, known already,
    is seen again */
 check('learned: this run\'s answers pass the same guard before they are learned',
     updateLearned(['203.0.113.9' => $now - $day],
         ['198.51.100.7', '192.0.2.5', '203.0.113.9', '203.0.113.10'],
-        ['198.51.100.7'], ['192.0.2.0/24'], $now, $maxAge),
+        $guarded(['198.51.100.7']), ['192.0.2.0/24'], $now, $maxAge),
     ['203.0.113.10' => $now, '203.0.113.9' => $now]);
 check('learned: an address not seen for the maximum age is forgotten',
-    updateLearned(['203.0.113.9' => $now - $maxAge - 1], [], [], [], $now, $maxAge),
+    updateLearned(['203.0.113.9' => $now - $maxAge - 1], [], $guarded([]), [], $now, $maxAge),
     []);
+/* A protected name left unanswered may share an address with an app, and this run
+   cannot tell which: learn nothing new rather than block it for a week. .9 is not
+   stamped again and .10 is not learned. */
+check('learned: nothing new is learned when a protected lookup failed',
+    updateLearned(['203.0.113.9' => $now - $day], ['203.0.113.9', '203.0.113.10'],
+        $failedGuard, [], $now, $maxAge),
+    ['203.0.113.9' => $now - $day]);
+check('learned: nothing new is learned when a protected lookup ran out of time',
+    updateLearned(['203.0.113.9' => $now - $day], ['203.0.113.9', '203.0.113.10'],
+        $skippedGuard, [], $now, $maxAge),
+    ['203.0.113.9' => $now - $day]);
+/* what the guard did answer still takes learned addresses out: .7 is protected,
+   .5 a CDN address */
+check('learned: with the guard incomplete the learned set is still re-filtered',
+    updateLearned(['198.51.100.7' => $now - $day, '192.0.2.5' => $now - $day, '203.0.113.9' => $now - $day], [],
+        $failedGuard, ['192.0.2.0/24'], $now, $maxAge),
+    ['203.0.113.9' => $now - $day]);
+/* the rest is kept as it is: expiry waits for a run whose guard is complete */
+check('learned: with the guard incomplete nothing expires',
+    updateLearned(['203.0.113.9' => $now - $maxAge - 1], [], $failedGuard, [], $now, $maxAge),
+    ['203.0.113.9' => $now - $maxAge - 1]);
+
+/* ---- rangesDue -------------------------------------------------------------- */
+
+$hour = 3600;
+$old = ['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day - 1];
+check('due: a list never downloaded is', rangesDue(null, $now, $day, $hour), true);
+/* exactly a day old is not yet more than a day old */
+check('due: a list a day old or younger is not',
+    rangesDue(['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day], $now, $day, $hour), false);
+check('due: a list more than a day old is', rangesDue($old, $now, $day, $hour), true);
+check('due: a stale list that failed within the hour is not',
+    rangesDue($old + ['failed_at' => $now - $hour + 1], $now, $day, $hour), false);
+/* an hour after the failure it is tried again */
+check('due: a stale list whose failure is an hour old is',
+    rangesDue($old + ['failed_at' => $now - $hour], $now, $day, $hour), true);
+/* the entry that a failed first download leaves waits the same way */
+check('due: a list never downloaded waits an hour after a failure',
+    [rangesDue(['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now - 60], $now, $day, $hour),
+     rangesDue(['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now - $hour], $now, $day, $hour)],
+    [false, true]);
 
 /* ---- refreshPublished ------------------------------------------------------ */
 
@@ -317,54 +366,72 @@ $fetch = function (string $url) use (&$fetched, &$answers) {
 $url = 'https://ranges.example/cidr.txt';
 $listed = ['ranges_url' => $url, 'ranges' => ['192.0.2.0/24']];
 $unlisted = ['ranges_url' => null, 'ranges' => ['203.0.113.0/28']];
-$old = ['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day - 1];
 
 $fetched = [];
 $answers = [$url => "198.51.100.0/24\n"];
 check('published: a list never downloaded is downloaded and kept with its time',
-    [refreshPublished(['t' => $listed, 'n' => $unlisted], [], $now, $day, $fetch), $fetched],
+    [refreshPublished(['t' => $listed, 'n' => $unlisted], [], $now, $day, $hour, $fetch), $fetched],
     [['ranges' => ['198.51.100.0/24', '203.0.113.0/28'],
       'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
       'failed' => []],
      [$url]]);
-/* exactly a day old is not yet more than a day old */
 $fetched = [];
 check('published: a list a day old is not downloaded again',
     [refreshPublished(['t' => $listed], ['t' => ['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day]],
-        $now, $day, $fetch)['ranges'], $fetched],
+        $now, $day, $hour, $fetch)['ranges'], $fetched],
     [['203.0.113.64/26'], []]);
 $fetched = [];
 check('published: a list more than a day old is downloaded again',
-    [refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $fetch), $fetched],
+    [refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $hour, $fetch), $fetched],
     [['ranges' => ['198.51.100.0/24'],
       'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
       'failed' => []],
      [$url]]);
-/* the old time stays, so the next run tries again */
+/* the last good list and its time stay; the failure's time holds the next try back */
 $answers = [];
-check('published: a failed download keeps the last good list and its time',
-    refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $fetch),
-    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old], 'failed' => ['t']]);
+check('published: a failed download keeps the last good list and notes the failure',
+    refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $hour, $fetch),
+    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old + ['failed_at' => $now]], 'failed' => ['t']]);
 $answers = [$url => "<html>\n198.51.100.0/24\n</html>"];
 check('published: a download with no ranges in it is a failed download',
-    refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $fetch),
-    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old], 'failed' => ['t']]);
+    refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $hour, $fetch),
+    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old + ['failed_at' => $now]], 'failed' => ['t']]);
 $answers = [];
 check('published: with no good download yet the shipped ranges are used',
-    refreshPublished(['t' => $listed], [], $now, $day, $fetch),
-    ['ranges' => ['192.0.2.0/24'], 'published' => [], 'failed' => ['t']]);
-/* a list kept from a version whose data still had the app's list address */
+    refreshPublished(['t' => $listed], [], $now, $day, $hour, $fetch),
+    ['ranges' => ['192.0.2.0/24'], 'published' => ['t' => ['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now]],
+     'failed' => ['t']]);
+/* within the hour after a failure nothing is downloaded, and the failure stands */
+$fetched = [];
+$answers = [$url => "198.51.100.0/24\n"];
+check('published: a failed list is not downloaded again within the hour',
+    [refreshPublished(['t' => $listed], ['t' => $old + ['failed_at' => $now - 60]], $now, $day, $hour, $fetch),
+     $fetched],
+    [['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old + ['failed_at' => $now - 60]], 'failed' => ['t']],
+     []]);
+check('published: a good download clears the failure',
+    refreshPublished(['t' => $listed], ['t' => $old + ['failed_at' => $now - $hour]], $now, $day, $hour, $fetch),
+    ['ranges' => ['198.51.100.0/24'], 'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
+     'failed' => []]);
+/* a list, and a failure, kept from a version whose data still had the app's list address */
 $fetched = [];
 check('published: an app with no list address uses only its shipped ranges',
-    [refreshPublished(['n' => $unlisted], ['n' => $old], $now, $day, $fetch), $fetched],
-    [['ranges' => ['203.0.113.0/28'], 'published' => ['n' => $old], 'failed' => []], []]);
+    [refreshPublished(['n' => $unlisted], ['n' => $old + ['failed_at' => $now - 60]], $now, $day, $hour, $fetch),
+     $fetched],
+    [['ranges' => ['203.0.113.0/28'], 'published' => ['n' => $old + ['failed_at' => $now - 60]], 'failed' => []],
+     []]);
 
 /* ---- sanitizeCache --------------------------------------------------------- */
 
 $emptyCache = ['learned' => [], 'published' => [], 'refreshed_at' => null, 'errors' => []];
+/* u failed after a good download, v before any */
 $goodCache = [
     'learned' => ['198.51.100.7' => $now],
-    'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now - $day]],
+    'published' => [
+        't' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now - $day],
+        'u' => ['ranges' => ['203.0.113.0/28'], 'fetched_at' => $now - 2 * $day, 'failed_at' => $now - 60],
+        'v' => ['ranges' => [], 'fetched_at' => 0, 'failed_at' => $now - 60],
+    ],
     'refreshed_at' => $now,
     'errors' => ['lookup failed: a.example'],
 ];
@@ -391,6 +458,7 @@ check('cache: published entries are judged one by one',
         'g' => 'x',
         'h' => ['ranges' => [['198.51.100.0/24']], 'fetched_at' => $now],
         'i' => new stdClass(),
+        'j' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now, 'failed_at' => (string)$now],
     ]])['published'],
     ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]]);
 check('cache: a refresh time or errors of the wrong type are dropped',
