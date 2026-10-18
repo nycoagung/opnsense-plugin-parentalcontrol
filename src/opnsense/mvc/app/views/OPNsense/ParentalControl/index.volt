@@ -183,6 +183,7 @@
                     <th data-column-id="allow_from" data-type="string" data-width="6em">{{ lang._('From') }}</th>
                     <th data-column-id="allow_to" data-type="string" data-width="6em">{{ lang._('Until') }}</th>
                     <th data-column-id="override" data-type="string">{{ lang._('Override') }}</th>
+                    <th data-column-id="messaging" data-type="string">{{ lang._('Messaging') }}</th>
                     <th data-column-id="description" data-type="string" data-formatter="safe">{{ lang._('Description') }}</th>
                     <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
                 </tr>
@@ -191,7 +192,7 @@
             <tfoot>
                 <tr>
                     <td></td>
-                    <td colspan="10"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
+                    <td colspan="11"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
                 </tr>
             </tfoot>
         </table>
