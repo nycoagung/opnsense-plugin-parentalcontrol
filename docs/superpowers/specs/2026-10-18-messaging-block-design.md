@@ -379,3 +379,103 @@ gaming parts now.
 - The status JSON is extended; the widget is untouched.
 - The uninstall test compares the whole of config.xml rather than a list of known
   objects, so it covers whatever other plugins the test machine has.
+
+## Changes made during implementation
+
+Where the finished code differs from what is written above, or adds to it. The text
+above is left as it was written.
+
+- **Reserved internet alias names.** The internet alias cannot be named `NoMessaging`
+  or `Messaging_Servers`: the model rejects both. Otherwise the two aliases would
+  collide on every sync and the internet block would stop. An alias made by hand
+  with one of those names still leaves messaging off, as "Firewall objects" says.
+- **Objects and refresh only while in use.** The spec has the list refreshed "on
+  every sync". The messaging aliases and rules are made, and the list is refreshed,
+  only while the plugin is enabled and some enabled device has Messaging set to
+  anything but Not blocked. The `NoMessaging` table is still synced on every run
+  (unless someone else's alias holds the name), so a device switched back to Not
+  blocked leaves it even when nobody else uses messaging.
+- **Deselecting an app clears the learned addresses.** The learned set does not
+  record which app an address came from, so when an app leaves the selection the set
+  starts again from nothing, and the names still selected are looked up again in the
+  same run. The cache records the apps of the last refresh to tell. Without this a
+  deselected app's addresses would stay blocked for up to 7 days. The cost is a
+  one-time loss of the rotation memory for the apps that stay.
+- **Canonical device targets.** A device address that is a CIDR with host bits
+  (`192.0.2.10/24`) is used in its network form (`192.0.2.0/24`), and an address
+  entered as `/32` as the bare address. This holds for the internet table, the
+  messaging table, the connection drops and the `resolved` field of the status. pf
+  keeps and lists entries that way, core's state filter rejects host bits, and the
+  internet switch's `pfctl -k` takes only a host.
+- **Table entries are compared in pf's listed form.** The entries wanted and the
+  entries listed are compared after the same conversion. Compared as written, a `/32`
+  (such as one of the Windows notification addresses) never matched its bare
+  listing, so it was deleted on one run and added again on the next.
+- **Only public answers are learned, and downloaded ranges are no wider than a
+  /8.** A DNS answer must be a public IPv4 address, not a private or reserved one,
+  `0.0.0.0`, or one in 100.64.0.0/10; a resolver that sinkholes a name would
+  otherwise get a host on the local network blocked for a week. A downloaded range
+  wider than a /8 is ignored, since no one service owns one. The cache file is checked
+  entry by entry when it is read.
+- **Protected names are remembered, and learning can pause.** The cache keeps each
+  protected name's last good answers, and a name that fails to resolve falls back to
+  its remembered answer while that is at most 7 days old. Only when a name has no
+  answer at all, now or within a week, does the plugin learn nothing new, and status
+  says "learning paused: no answer for" followed by the names. Learned addresses
+  still expire while learning is paused. Learned addresses also go through the guard
+  again on every run, so one that a protected name starts to resolve to, or that a
+  plugin update's shared-CDN list covers, leaves the set.
+- **Lookups are limited in time.** Each name gets one try of one second. The
+  notification services' and the apps' names share 20 seconds, the notification
+  names first, and the protected names have 10. Names not reached are skipped and
+  reported.
+- **A failed range download waits an hour.** The spec says published ranges are
+  fetched at most once a day and the last good copy is kept on failure. A download
+  that fails is not tried again for an hour, so an unreachable address does not slow
+  every sync.
+- **Viber is not offered.** The spec offered it only once its chat servers could be
+  found and pass the same checks. They could not be identified, so it is dropped, and
+  the default selection is WhatsApp, Telegram, Snapchat, Signal and LINE.
+- **The installer hands over, and a missing file is named.** An installed
+  `install.sh` downloads the release and runs that release's own `install.sh`; before,
+  it copied only the file list it was installed with, so a release that added files
+  installed incompletely. `sync.php` and `uninstall.php` check each file in `lib/`
+  first and, when one is missing, print "plugin files incomplete (missing lib/...):
+  run 'configctl parentalcontrol install' again" and exit 1. 0.0.2's installer cannot
+  be changed, so upgrading from 0.0.2 needs the install run twice. A missing
+  `messaging.json` is not fatal: messaging reports it and the internet block carries on.
+- **Uninstall is stricter.**
+  - It takes the sync lock, waiting up to 30 seconds for a running sync, and reads the
+    configuration again once it holds it, so a sync in progress cannot save its own
+    copy over the removal.
+  - `uninstall.sh` runs `uninstall.php --final`, which puts a marker file in the data
+    directory down first and keeps it once everything is removed. While it exists
+    every sync changes nothing, so a sync that was waiting cannot put back what was
+    removed; `uninstall.sh` removes the directory last, and a new install removes the
+    marker. A refusal or a failure removes it at once. The configd action runs without
+    `--final`: it removes the configuration only, leaves no marker, and the next sync
+    puts the objects back, which is what the step 5 rehearsal needs.
+  - SIGINT, SIGTERM and SIGHUP are turned into a clean exit, so the marker is
+    removed. SIGKILL, or a PHP without pcntl, can leave it, and syncs stay paused until
+    `uninstall.sh` is run again or the plugin is reinstalled.
+  - After the filter reload, the three external tables are removed with core's `filter
+    kill table`. pf keeps persistent tables, and core's own alias clean-up skips
+    external aliases, so otherwise they stay listed, empty, until a reboot.
+  - The reference check covers the whole configuration, not only rules: any element's
+    text or attribute that names one of the plugin's aliases as a whole word counts,
+    except the plugin's own objects (its rules, aliases, cron job and settings) and the
+    record of the last save. A configuration that cannot be read or parsed refuses too.
+- **Status.** The `messaging` object gains `in_use`, `error` (why messaging cannot be
+  enforced: a name conflict, a missing or renamed object, an unreadable data file),
+  `learned`, and the two table names. When messaging is not in use, `refreshed_at` is
+  null and `errors` is empty, so a time or errors from an earlier use are not shown. The
+  summary line says "Messaging: not in use" in that case and "not refreshed yet" when it
+  is in use and no refresh has run: `refreshed_at` is null in both, so it cannot tell
+  them apart.
+- **Model version.** The model is version 1.1.0 with no migration. Devices saved by
+  0.0.2 load with Messaging at Not blocked, and the app list at its default.
+- **Static analysis found more than the known framework findings.** Verification
+  step 2 expects none. PHPStan reports 13 findings of a new kind, where JSON read from
+  the data file or from configd is `mixed`, and Semgrep reports two false positives
+  (the marker's `unlink()` and the generator's `urllib`). None is a defect; the
+  README's "What has been verified" lists them.

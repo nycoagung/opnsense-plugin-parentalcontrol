@@ -8,10 +8,37 @@ ruleset reload.
 Blocked devices lose internet only - local services such as printers, media
 players and dashboards keep working.
 
+A device can also be denied messaging apps (WhatsApp, Telegram, Snapchat,
+Signal and LINE), always or outside its allowed hours, while the rest of its
+internet keeps working. Blocking messaging also cuts every push notification
+on the device, including iMessage and incoming FaceTime calls, for as long as
+it lasts.
+
 WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 
 Plugin Changelog
 ----------------
+
+0.1.0
+
+* Messaging blocking: each device has a Messaging setting (not blocked,
+  blocked, or blocked outside its allowed hours) and Settings has a list of
+  messaging apps to block. While a device is denied messaging all its
+  notifications are cut too, including iMessage and incoming FaceTime calls
+* Messaging adds two aliases (NoMessaging and Messaging_Servers) and two
+  floating block rules, made the first time a device uses it. The internet
+  alias can no longer be named NoMessaging or Messaging_Servers
+* The Status tab shows messaging per device, with a summary line, and the
+  status output gains the messaging fields
+* A device address with host bits set (192.0.2.10/24) is used in its network
+  form and one entered as /32 as the bare address, which is how pf keeps them
+* Uninstall also removes the messaging aliases, rules and pf tables and the
+  plugin's data directory, waits for a running sync, and refuses, changing
+  nothing, while anything else in the configuration refers to one of the
+  plugin's aliases
+* An installed installer now runs the downloaded release's own installer, so a
+  release that adds files installs completely. Upgrading from 0.0.2 needs the
+  install run twice (see the README)
 
 0.0.2
 
