@@ -493,7 +493,7 @@ if ($mode === 'status') {
     $msgError = $msgConflict;
     if ($msgError === null && $msgInUse) {
         $msgError = messagingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
-            ?? (messagingData() === null ? MSG_DATA_MISSING : null);
+            ?? (messagingData(MSG_DATA_FILE) === null ? MSG_DATA_MISSING : null);
     }
     $cache = readCache(MSG_CACHE_FILE);
     echo json_encode([
@@ -761,7 +761,7 @@ $dest = [];             /* this run's servers, for dropping connections below */
 $addedDest = [];        /* the servers this run added to their table */
 $cache = null;          /* the cache this run wrote; null when it did not refresh */
 if ($msgObjectsOk && $msgInUse) {
-    $data = messagingData();
+    $data = messagingData(MSG_DATA_FILE);
     if ($data === null) {
         fwrite(STDERR, 'messaging: ' . MSG_DATA_MISSING . "\n");
     } else {

@@ -7,7 +7,8 @@
  *
  * The refresh and the drops go through configd, so they run only on the
  * firewall. sync.php loads this file after the other lib files, whose functions
- * and constants these call; messagingData() reads sync.php's MSG_DATA_FILE.
+ * and constants these call. The data file, the cache file and the table are
+ * parameters: nothing here reads what sync.php defines.
  */
 
 use OPNsense\Core\Backend;
@@ -17,9 +18,9 @@ use OPNsense\Core\Backend;
  *
  * @return ?array<string, mixed>
  */
-function messagingData(): ?array
+function messagingData(string $path): ?array
 {
-    $raw = @file_get_contents(MSG_DATA_FILE);
+    $raw = @file_get_contents($path);
     $data = $raw === false ? null : json_decode($raw, true);
     return is_array($data) && ($data['schema'] ?? null) === 1 ? $data : null;
 }
