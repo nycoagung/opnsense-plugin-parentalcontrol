@@ -12,6 +12,7 @@
  */
 
 $lib = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/lib';
+require $lib . '/markers.php';
 require $lib . '/messaging.php';
 
 $path = $argv[1] ?? __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/messaging.json';
@@ -158,5 +159,14 @@ check('data: model default selects every app',
     implode(',', array_keys($appLabels)));
 
 check('data: model labels match apps', $options('general/messaging_apps'), $appLabels);
+
+/* The internet alias's name is a setting, the messaging aliases' names are fixed.
+   Set to one of those, the internet alias would collide with that alias on every
+   sync, and the internet block would stop. */
+$mask = (string)($model->xpath('/model/items/general/alias_name/Mask')[0] ?? '');
+$accepts = fn(string $name): bool => @preg_match($mask, $name) === 1;
+check('model: alias name reserves the messaging aliases',
+    [$accepts(MSG_DEVICES_ALIAS), $accepts(MSG_SERVERS_ALIAS), $accepts('NoInternet'), $accepts(str_repeat('a', 25))],
+    [false, false, true, true]);
 
 finish();

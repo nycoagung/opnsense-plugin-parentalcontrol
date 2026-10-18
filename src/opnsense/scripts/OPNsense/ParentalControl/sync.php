@@ -55,9 +55,7 @@ const MSG_RULES = [
 $mode = isset($argv[1]) ? $argv[1] : 'sync';
 
 /* One sync at a time: DNS lookups make a run's length depend on the network,
-   and cron starts one every minute. Taken before the configuration is read, so
-   a run that waited sees what the one before it saved instead of saving over
-   it. Status only reads, so it never waits. */
+   and cron starts one every minute. Status only reads, so it never waits. */
 if ($mode !== 'status') {
     if (!is_dir(DATA_DIR)) {
         @mkdir(DATA_DIR, 0700);         /* a run starting at the same moment may make it first */
@@ -74,6 +72,11 @@ if ($mode !== 'status') {
         }
         sleep(1);
     }
+    /* config.inc read config.xml when it was required, before the lock was
+       held. Read it again, so this run builds its models from what the run
+       before it saved, and from any change made in the GUI meanwhile, instead
+       of saving an older copy over them. */
+    Config::getInstance()->forceReload();
 }
 
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
@@ -102,9 +105,10 @@ $enabled = $mdl->general->enabled->isEqual('1');
 /**
  * Resolve one device to blocked/allowed plus a human reason.
  *
+ * @param array{bool, string} $schedule deviceSchedule() for this device
  * @return array{bool, string} [blocked, reason]
  */
-function resolveDevice(BaseField $dev, bool $enabled): array
+function resolveDevice(BaseField $dev, bool $enabled, array $schedule): array
 {
     if (!$enabled) {
         return [false, 'plugin disabled'];
@@ -125,12 +129,13 @@ function resolveDevice(BaseField $dev, bool $enabled): array
         return [true, 'always blocked'];
     }
 
-    return deviceSchedule($dev);
+    return $schedule;
 }
 
 /**
- * The device's schedule, evaluated now. Both the internet and the messaging
- * decision read it here, so the two cannot come to disagree about it.
+ * The device's schedule, evaluated now. Called once per device per run, and
+ * that one result is handed to both the internet and the messaging decision,
+ * so the two cannot disagree, even when a run straddles a minute boundary.
  *
  * @return array{bool, string} [blocked, reason]
  */
@@ -215,6 +220,25 @@ function macToAddresses(string $mac): array
 }
 
 /**
+ * Validate and save a model. On failure print every message, prefixed with
+ * $what - a bare "validation failed" makes a first install impossible to
+ * diagnose without a shell - and save nothing.
+ */
+function saveModel(BaseModel $mdl, string $what): bool
+{
+    $val = $mdl->performValidation();
+    if ($val->count() > 0) {
+        foreach ($val->getMessages() as $msg) {
+            fwrite(STDERR, "$what: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
+        }
+        return false;
+    }
+    $mdl->serializeToConfig();
+    Config::getInstance()->save();
+    return true;
+}
+
+/**
  * The schedule is only ever re-evaluated when this script runs, so the cron
  * entry is not optional - without it the UI would show the right answer while
  * nothing actually changed. The plugin therefore owns the job: created when
@@ -259,18 +283,9 @@ function ensureCronJob(Backend $backend, bool $enabled): void
         $changed = true;
     }
 
-    if (!$changed) {
+    if (!$changed || !saveModel($cron, 'cron')) {
         return;
     }
-    $val = $cron->performValidation();
-    if ($val->count() > 0) {
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "cron: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
-        return;
-    }
-    $cron->serializeToConfig();
-    Config::getInstance()->save();
     /* 'cron restart' is what regenerates the crontab - core's own cron
        ServiceController calls exactly this. 'cron reconfigure' is not a
        registered action: it returns quietly and the crontab is never written,
@@ -367,12 +382,13 @@ $blockSet = [];
 $msgBlockSet = [];
 $msgInUse = false;          /* the messaging objects are made on first use */
 foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
-    list($blocked, $reason) = resolveDevice($dev, $enabled);
+    $schedule = deviceSchedule($dev);
+    list($blocked, $reason) = resolveDevice($dev, $enabled, $schedule);
     [$mBlocked, $mReason] = messagingDecision(
         $enabled,
         $dev->enabled->isEqual('1'),
         $dev->messaging->getValue(),
-        deviceSchedule($dev)
+        $schedule
     );
     $msgInUse = $msgInUse
         || ($enabled && $dev->enabled->isEqual('1') && !$dev->messaging->isEqual('off'));
@@ -477,16 +493,67 @@ function syncTable(Backend $backend, string $table, array $want): array
 }
 
 /**
+ * Name and description of each item of a model's array field ('' for a field
+ * the item does not have: rules have no name). For aliases this includes the
+ * ones core and plugins generate, which config.xml does not hold.
+ *
+ * @return list<array{name: string, description: string}>
+ */
+function modelRows(BaseField $items): array
+{
+    $rows = [];
+    foreach ($items->iterateItems() as $item) {
+        $rows[] = [
+            'name' => isset($item->name) ? $item->name->getValue() : '',
+            'description' => isset($item->description) ? $item->description->getValue() : '',
+        ];
+    }
+    return $rows;
+}
+
+/**
+ * The same rows read from config.xml as loaded, for the elements at $xpath.
+ * No model is built: building the Filter model runs configd calls and can
+ * rewrite core's alias cache, which a status poll must not do.
+ *
+ * @return list<array{name: string, description: string}>
+ */
+function configRows(string $xpath): array
+{
+    $rows = [];
+    /* SimpleXML nodes, not model fields, so a string cast is how their text is read */
+    foreach (Config::getInstance()->object()->xpath($xpath) ?: [] as $item) {
+        $rows[] = ['name' => (string)$item->name, 'description' => (string)$item->description];
+    }
+    return $rows;
+}
+
+/**
+ * The first of $rows whose description starts with $marker, or null: how the
+ * plugin finds its own objects, whatever they are called now.
+ *
+ * @param list<array{name: string, description: string}> $rows
+ * @return ?array{name: string, description: string}
+ */
+function findByMarker(array $rows, string $marker): ?array
+{
+    foreach ($rows as $row) {
+        if (strpos($row['description'], $marker) === 0) {
+            return $row;
+        }
+    }
+    return null;
+}
+
+/**
  * Why the messaging objects cannot be used, or null when they can. Their names
  * are fixed, and an alias with one of them that this plugin did not make is
  * never taken over.
+ *
+ * @param list<array{name: string, description: string}> $aliases every alias
  */
-function messagingConflict(Alias $aliasMdl): ?string
+function messagingConflict(array $aliases): ?string
 {
-    $aliases = [];
-    foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
-        $aliases[] = ['name' => $item->name->getValue(), 'description' => $item->description->getValue()];
-    }
     $names = aliasConflicts($aliases, MSG_ALIASES);
     return $names === [] ? null : implode('; ', array_map(
         fn(string $name): string => "alias name $name is used by an alias this plugin does not own",
@@ -494,47 +561,53 @@ function messagingConflict(Alias $aliasMdl): ?string
     ));
 }
 
-/** Does an item of $items have a description starting with $marker? */
-function hasMarker(BaseField $items, string $marker): bool
-{
-    foreach ($items->iterateItems() as $item) {
-        if (strpos($item->description->getValue(), $marker) === 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /**
- * Which messaging aliases and rules are not in the configuration, or null when
- * all of them are. Only reads.
+ * What is wrong with the messaging objects, or null when nothing is: first the
+ * ones missing, then the aliases renamed in the GUI. Core repoints the rules to
+ * a renamed alias, while the plugin keeps filling the table of the fixed name,
+ * which nothing then uses. Only reads.
+ *
+ * @param list<array{name: string, description: string}> $aliases every alias
+ * @param list<array{name: string, description: string}> $rules   every rule
  */
-function missingMessagingObjects(Alias $aliasMdl, Filter $filterMdl): ?string
+function messagingObjectsProblem(array $aliases, array $rules): ?string
 {
     $missing = [];
-    foreach (MSG_ALIASES as $marker) {
-        if (!hasMarker($aliasMdl->aliases->alias, $marker)) {
+    $renamed = [];
+    foreach (MSG_ALIASES as $name => $marker) {
+        $alias = findByMarker($aliases, $marker);
+        if ($alias === null) {
             $missing[] = $marker;
+        } elseif ($alias['name'] !== $name) {
+            $renamed[] = "messaging alias renamed: {$alias['name']} should be $name";
         }
     }
     foreach (array_keys(MSG_RULES) as $marker) {
-        if (!hasMarker($filterMdl->rules->rule, $marker)) {
+        if (findByMarker($rules, $marker) === null) {
             $missing[] = $marker;
         }
     }
-    return $missing === [] ? null : 'messaging objects missing: ' . implode(', ', $missing);
+
+    $problems = [];
+    if ($missing !== []) {
+        $problems[] = 'messaging objects missing: ' . implode(', ', $missing);
+    }
+    if ($renamed !== []) {
+        $problems[] = implode(', ', $renamed);
+    }
+    return $problems === [] ? null : implode('; ', $problems);
 }
 
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
-    $aliasMdl = new Alias();
-    $msgConflict = messagingConflict($aliasMdl);
-    /* While in use the objects must exist, or a device shown as denied messaging
-       has nothing enforcing it. Out of use their absence is normal. A conflict
-       says more, so it wins. */
+    $aliases = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
+    $msgConflict = messagingConflict($aliases);
+    /* While in use the objects must exist under their fixed names, or a device
+       shown as denied messaging has nothing enforcing it. Out of use their
+       absence is normal. A conflict says more, so it wins. */
     $msgError = $msgConflict;
     if ($msgError === null && $msgInUse) {
-        $msgError = missingMessagingObjects($aliasMdl, new Filter());
+        $msgError = messagingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'));
     }
     echo json_encode([
         'enabled' => $enabled,
@@ -610,19 +683,8 @@ if ($localNode === null) {
     $localNode->name = $localAlias;
     $cfgChanged = true;
 }
-if ($cfgChanged) {
-    $val = $aliasMdl->performValidation();
-    if ($val->count() == 0) {
-        $aliasMdl->serializeToConfig();
-        Config::getInstance()->save();
-    } else {
-        /* print what actually failed - a bare "validation failed" makes a first
-           install impossible to diagnose without a shell */
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "alias: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
-        exit(1);
-    }
+if ($cfgChanged && !saveModel($aliasMdl, 'alias')) {
+    exit(1);
 }
 
 /* one floating block rule: source in the alias, destination NOT local.
@@ -667,38 +729,13 @@ if ($ruleNode === null || $ruleChanged) {
         $rule->destination_not = '1';
         $rule->description = $ruleDescr;
     }
-    $val = $filterMdl->performValidation();
-    if ($val->count() == 0) {
-        $filterMdl->serializeToConfig();
-        Config::getInstance()->save();
-        $cfgChanged = true;
-    } else {
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "rule: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
+    if (!saveModel($filterMdl, 'rule')) {
         exit(1);
     }
+    $cfgChanged = true;
 }
 
 /* ---- make sure the messaging aliases and rules exist --------------------- */
-
-/**
- * Validate and save a model. On failure print why, as the script's other
- * validation messages are printed, and save nothing.
- */
-function saveModel(BaseModel $mdl, string $what): bool
-{
-    $val = $mdl->performValidation();
-    if ($val->count() > 0) {
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "$what: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
-        return false;
-    }
-    $mdl->serializeToConfig();
-    Config::getInstance()->save();
-    return true;
-}
 
 /**
  * Create whichever messaging aliases and rules are missing, found by marker.
@@ -715,14 +752,15 @@ function saveModel(BaseModel $mdl, string $what): bool
 function ensureMessagingObjects(bool &$cfgChanged): ?string
 {
     $aliasMdl = new Alias();
-    $conflict = messagingConflict($aliasMdl);
+    $aliases = modelRows($aliasMdl->aliases->alias);
+    $conflict = messagingConflict($aliases);
     if ($conflict !== null) {
         return $conflict;
     }
 
     $aliasAdded = false;
     foreach (MSG_ALIASES as $name => $marker) {
-        if (!hasMarker($aliasMdl->aliases->alias, $marker)) {
+        if (findByMarker($aliases, $marker) === null) {
             $node = $aliasMdl->aliases->alias->Add();
             $node->name = $name;
             $node->type = 'external';           /* contents managed here, not in config */
@@ -744,9 +782,10 @@ function ensureMessagingObjects(bool &$cfgChanged): ?string
     }
 
     $filterMdl = new Filter();
+    $rules = modelRows($filterMdl->rules->rule);
     $ruleAdded = false;
     foreach (MSG_RULES as $marker => [$protocol, $destination, $port]) {
-        if (!hasMarker($filterMdl->rules->rule, $marker)) {
+        if (findByMarker($rules, $marker) === null) {
             $rule = $filterMdl->rules->rule->Add();
             $rule->enabled = '1';
             $rule->action = 'block';
@@ -773,10 +812,16 @@ function ensureMessagingObjects(bool &$cfgChanged): ?string
 /* The objects are fine unless an alias that is not ours holds one of their
    names. That is checked every run, in use or not, because the device table is
    synced every run (below); only creating the objects waits for first use. */
-$msgError = messagingConflict($aliasMdl);
+$msgError = messagingConflict(modelRows($aliasMdl->aliases->alias));
 $msgObjectsOk = $msgError === null;
 if ($msgObjectsOk && $msgInUse) {
-    $msgError = ensureMessagingObjects($cfgChanged);
+    /* an exception too, say a failed config save, must not stop the internet
+       block below */
+    try {
+        $msgError = ensureMessagingObjects($cfgChanged);
+    } catch (\Throwable $e) {
+        $msgError = $e->getMessage();
+    }
 }
 if ($msgError !== null) {
     fwrite(STDERR, "messaging: $msgError\n");

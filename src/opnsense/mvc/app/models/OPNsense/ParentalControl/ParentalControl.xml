@@ -11,8 +11,8 @@
             <alias_name type="TextField">
                 <Default>NoInternet</Default>
                 <Required>Y</Required>
-                <Mask>/^[a-zA-Z0-9_]{1,25}$/</Mask>
-                <ValidationMessage>Letters, digits and underscore only, up to 25 characters. The companion alias appends &quot;_Local&quot; and pf table names cannot exceed 31.</ValidationMessage>
+                <Mask>/^(?!(NoMessaging|Messaging_Servers)$)[a-zA-Z0-9_]{1,25}$/</Mask>
+                <ValidationMessage>Letters, digits and underscore only, up to 25 characters, and not NoMessaging or Messaging_Servers, which messaging blocking uses. The companion alias appends &quot;_Local&quot; and pf table names cannot exceed 31.</ValidationMessage>
             </alias_name>
             <kill_states type="BooleanField">
                 <Default>1</Default>
