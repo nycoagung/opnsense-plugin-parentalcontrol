@@ -18,6 +18,7 @@ from pathlib import Path
 GENERATOR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / 'tools/build-messaging-data.py'
 spec = importlib.util.spec_from_file_location('build_messaging_data', GENERATOR)
 gen = importlib.util.module_from_spec(spec)
+sys.dont_write_bytecode = True      # importing must leave no tools/__pycache__ behind
 spec.loader.exec_module(gen)
 
 passed = failed = 0
@@ -38,8 +39,9 @@ def build(xml):
     with tempfile.TemporaryDirectory() as tmp:
         wns, out = Path(tmp, 'wns.xml'), Path(tmp, 'messaging.json')
         wns.write_text(xml)
-        # a download, had one been tried first, would fail at once and name itself
-        env = dict(os.environ, https_proxy='http://127.0.0.1:9')
+        # a download, had one been tried first, would fail at once and name itself; and
+        # no colours, since the last line of the traceback is compared as plain text
+        env = dict(os.environ, https_proxy='http://127.0.0.1:9', NO_COLOR='1', PYTHON_COLORS='0')
         run = subprocess.run([sys.executable, '-I', str(GENERATOR), '--wns', str(wns), '--out', str(out)],
                              capture_output=True, text=True, env=env)
         last = (run.stderr.strip().splitlines() or [''])[-1]

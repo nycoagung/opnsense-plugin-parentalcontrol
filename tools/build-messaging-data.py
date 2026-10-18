@@ -27,9 +27,8 @@ article 102266, "If your Apple devices aren't getting Apple push notifications";
 Google's host names and ports from Firebase's "Configure your Network for FCM";
 the apps' host names from a probe on 2026-10-18, each kept only while --check
 shows it on the network expected for it and kept by the guard. WhatsApp's
-e1 to e16.whatsapp.net edge names are all listed: whatsapp.net's own zone
-rotates each of them between its two AWS Global Accelerators,
-ac9293e5fb5d2d1d2 and a66e5b8d30b652954.
+sixteen numbered edge names are all listed, since its own DNS zone rotates
+each of them between two AWS Global Accelerators.
 
 --check resolves every app, notification and protected host name through this
 machine's resolver and prints each address with its network and owner
