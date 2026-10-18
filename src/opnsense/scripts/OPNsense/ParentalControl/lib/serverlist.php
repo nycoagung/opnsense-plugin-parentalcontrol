@@ -89,14 +89,13 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
         $hour,
         7 * 86400
     );
-    $context = stream_context_create(['http' => ['timeout' => 10]]);
     $published = refreshPublished(
         $selected,
         $cache['published'],
         $now,
         86400,
         3600,
-        fn(string $url) => @file_get_contents($url, false, $context)
+        downloadPublished(...)
     );
 
     $ranges = filterRanges(
@@ -125,6 +124,35 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
             $ranges['errors']
         ),
     ]];
+}
+
+/**
+ * The body at an https URL, or false unless the server answers 200 with a body.
+ *
+ * Only https is allowed, curl's own certificate checks apply, a redirect is not
+ * followed, and the connection and the whole transfer each get ten seconds. A PHP
+ * without the curl extension fails every download.
+ *
+ * @return string|false
+ */
+function downloadPublished(string $url): string|false
+{
+    /* curl, because OPNsense sets allow_url_fopen = 0, so file_get_contents() cannot open a URL there */
+    if (!function_exists('curl_init')) {
+        return false;
+    }
+    $ch = curl_init($url);
+    if ($ch === false || !curl_setopt_array($ch, [
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_RETURNTRANSFER => true,
+    ])) {
+        return false;
+    }
+    $body = curl_exec($ch);
+    return is_string($body) && $body !== '' && curl_getinfo($ch, CURLINFO_RESPONSE_CODE) === 200 ? $body : false;
 }
 
 /**

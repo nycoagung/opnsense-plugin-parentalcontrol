@@ -712,8 +712,8 @@ case $(sget messaging.errors) in *"range download failed"*) problem "errors: $(s
 fetched=$($PC jget published.telegram.fetched_at < "$DATA/messaging-cache.json")
 case $fetched in ''|0|*[!0-9]*) problem "cache published.telegram.fetched_at: $fetched" ;; esac
 verdict "server list: Telegram's ranges downloaded"
-[ "$(php -r 'echo ini_get("allow_url_fopen");')" = 1 ] || problem "allow_url_fopen is off"
-verdict "server list: allow_url_fopen on"
+[ "$(php -r 'echo extension_loaded("curl") ? 1 : 0;')" = 1 ] || problem "php's curl extension is not loaded"
+verdict "server list: curl extension loaded"
 mode=$(stat -f %Lp "$DATA/messaging-cache.json" 2>&1)
 [ "$mode" = 600 ] || problem "mode $mode"
 verdict "server list: cache file mode 600"
