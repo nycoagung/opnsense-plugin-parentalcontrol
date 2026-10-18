@@ -8,23 +8,28 @@ A maintainer's tool, never installed. The build reads the hand-maintained
 tools/messaging-sources.json and adds the lists it downloads:
 
 - each app's published ranges (Telegram's cidr.txt), IPv4 only;
-- the addresses Windows PCs reach the Windows Notification Service on, from
-  Microsoft Download Center item 44238, "Windows Notification Service (WNS) VIP
-  and IP Ranges". The file's address changes with every new version: find the
-  current one on https://echo.rendering.prod.mscas.io/en-us/download/details.aspx?id=44238
+- the addresses Windows PCs reach the Windows Notification Service on: the
+  <ClientIPsIPv4> element of Microsoft Download Center item 44238, "Windows
+  Notification Service (WNS) VIP and IP Ranges". The file's address changes
+  with every new version: find the current one on
+  https://echo.rendering.prod.mscas.io/en-us/download/details.aspx?id=44238
   (the same page, rendered on the server) and update
   notifications.microsoft_ranges_url. --wns reads a local copy instead;
 - the shared CDNs' ranges (Cloudflare, Fastly, Amazon CloudFront, and Akamai's
   announced prefixes from RIPEstat), merged.
 
-A failed download, an entry that is not an address range, or a list that comes
-out empty stops the build with exit status 1 before anything is written.
+A failed download, an entry that is not an address range, a WNS file without
+the element, or a list that comes out empty stops the build with exit status 1
+before anything is written.
 
 Where the hand-maintained data comes from: Apple's ranges from Apple support
 article 102266, "If your Apple devices aren't getting Apple push notifications";
 Google's host names and ports from Firebase's "Configure your Network for FCM";
 the apps' host names from a probe on 2026-10-18, each kept only while --check
-shows it on the network expected for it and kept by the guard.
+shows it on the network expected for it and kept by the guard. WhatsApp's
+eN.whatsapp.net edge names are kept only while they resolve, from here and from
+RIPEstat's dns-chain, to its AWS Global Accelerator
+ac9293e5fb5d2d1d2.awsglobalaccelerator.com.
 
 --check resolves every app, notification and protected host name through this
 machine's resolver and prints each address with its network and owner
@@ -74,10 +79,27 @@ def strs(nets):
     return [str(n) for n in nets]
 
 
+def wns_ranges(source, xml):
+    """The IPv4 ranges devices receive Windows notifications from.
+
+    Only the file's <ClientIPsIPv4> element counts, with comments removed: its
+    other sections list where cloud services send from, which no device
+    contacts, and the plugin blocks these ranges as they are. A file without
+    the element, or without a range in it, stops the build.
+    """
+    client = re.search(r'<ClientIPsIPv4>(.*?)</ClientIPsIPv4>', re.sub(r'<!--.*?-->', '', xml, flags=re.S), re.S)
+    if client is None:
+        raise ValueError(f'{source}: no <ClientIPsIPv4> element')
+    return ipv4(source, CIDR.findall(client.group(1)))
+
+
 def build(wns_file):
     src = json.loads(SOURCES.read_text())
     notes = src['notifications']
     cdn = src['shared_cdn_sources']
+    # Microsoft's file first, so a bad one stops the build before any download
+    wns_source = wns_file or notes['microsoft_ranges_url']
+    microsoft = wns_ranges(wns_source, (Path(wns_file).read_bytes() if wns_file else fetch(wns_source)).decode())
     apps = {
         app_id: {
             'label': app['label'],
@@ -88,8 +110,6 @@ def build(wns_file):
         }
         for app_id, app in src['apps'].items()
     }
-    wns_source = wns_file or notes['microsoft_ranges_url']
-    wns = Path(wns_file).read_bytes() if wns_file else fetch(wns_source)
     cloudfront = json.loads(fetch(cdn['cloudfront']))['prefixes']
     cdn_lists = [
         ipv4(cdn['cloudflare'], fetch(cdn['cloudflare']).decode().split()),
@@ -106,7 +126,7 @@ def build(wns_file):
             'google_hosts': notes['google_hosts'],
             'google_ports': notes['google_ports'],
             'microsoft_hosts': notes['microsoft_hosts'],
-            'microsoft_ranges': strs(ipv4(wns_source, CIDR.findall(wns.decode()))),
+            'microsoft_ranges': strs(microsoft),
         },
         'shared_cdn_ranges': strs(sorted(ipaddress.collapse_addresses(n for nets in cdn_lists for n in nets))),
     }
@@ -176,4 +196,5 @@ def main():
         Path(args.out).write_text(json.dumps(build(args.wns), indent=2, sort_keys=True) + '\n')
 
 
-main()
+if __name__ == '__main__':
+    main()
