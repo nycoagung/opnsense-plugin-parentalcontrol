@@ -61,23 +61,37 @@ if (!is_dir(DATA_DIR)) {
    away again: a refusal changed nothing, and a run that failed part way must not
    stop the syncs that would put the rest back. */
 if ($final) {
-    if (!@touch(UNINSTALL_MARKER)) {
-        fwrite(STDERR, "not removing anything: cannot create " . UNINSTALL_MARKER . "\n");
-        exit(1);
+    /* A signal kills PHP without running shutdown functions; turn it into exit(1),
+       which runs them. Without pcntl a signal still leaves the marker behind. */
+    if (function_exists('pcntl_signal')) {
+        pcntl_async_signals(true);
+        foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
+            pcntl_signal($signal, function (): void {
+                exit(1);
+            });
+        }
     }
+    /* registered first, so no moment exists with the marker made and nothing to remove it */
     $cleanUp = [UNINSTALL_MARKER];  /* removed at exit, unless the run gets to the end */
     register_shutdown_function(function () use (&$cleanUp): void {
         foreach ($cleanUp as $file) {
             @unlink($file);
         }
     });
+    if (!@touch(UNINSTALL_MARKER)) {
+        fwrite(STDERR, "not removing anything: cannot create " . UNINSTALL_MARKER . "\n");
+        exit(1);
+    }
 }
 $lock = @fopen(DATA_DIR . '/sync.lock', 'c');
 if ($lock === false) {
-    fwrite(STDERR, "cannot open " . DATA_DIR . "/sync.lock\n");
+    fwrite(STDERR, "not removing anything: cannot open " . DATA_DIR . "/sync.lock\n");
     exit(1);
 }
 for ($waited = 0; !flock($lock, LOCK_EX | LOCK_NB); $waited++) {
+    if ($waited === 0) {
+        echo "waiting for a running sync to finish\n";
+    }
     if ($waited >= 30) {
         fwrite(STDERR, "not removing anything: a sync is still running\n");
         exit(1);
@@ -86,7 +100,8 @@ for ($waited = 0; !flock($lock, LOCK_EX | LOCK_NB); $waited++) {
 }
 Config::getInstance()->forceReload();
 
-/* 1. the plugin's own aliases and rules, found by marker whatever they are called now */
+/* 1. the plugin's own aliases and rules, found by marker whatever they are called
+      now, and its cron job, found by origin */
 $aliasMdl = new Alias();
 $aliasUuids = [];           /* uuid => name */
 $tables = [];               /* the external aliases' names: pf holds their addresses */
@@ -111,6 +126,13 @@ foreach ($filterMdl->rules->rule->iterateItems() as $uuid => $rule) {
         }
     }
 }
+$cron = new Cron();
+$jobUuids = [];
+foreach ($cron->jobs->job->iterateItems() as $uuid => $job) {
+    if ($job->origin->isEqual('parentalcontrol')) {
+        $jobUuids[] = $uuid;
+    }
+}
 
 /* 2. before any change: refuse while anything else refers to one of the aliases */
 $xml = @file_get_contents('/conf/config.xml');
@@ -118,7 +140,7 @@ if ($xml === false) {
     fwrite(STDERR, "not removing anything: could not read /conf/config.xml\n");
     exit(1);
 }
-$refs = findForeignReferences($xml, array_merge(array_keys($aliasUuids), $ruleUuids),
+$refs = findForeignReferences($xml, array_merge(array_keys($aliasUuids), $ruleUuids, $jobUuids),
     array_values($aliasUuids));
 if ($refs === [CONFIG_UNPARSED]) {
     fwrite(STDERR, 'not removing anything: ' . CONFIG_UNPARSED . "\n");
@@ -158,13 +180,6 @@ if (!empty($aliasUuids)) {
 }
 
 /* 6. our cron job */
-$cron = new Cron();
-$jobUuids = [];
-foreach ($cron->jobs->job->iterateItems() as $uuid => $job) {
-    if ($job->origin->isEqual('parentalcontrol')) {
-        $jobUuids[] = $uuid;
-    }
-}
 foreach ($jobUuids as $uuid) {
     $cron->jobs->job->del($uuid);
     $removed[] = 'cron job ' . substr($uuid, 0, 8);
