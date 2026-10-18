@@ -10,14 +10,16 @@ and local dashboards keep working.
 
 ## How it enforces
 
-Two aliases and one rule: an externally-managed alias holding the addresses
-currently denied internet, a companion alias defining private address space, and
-one floating rule blocking the first to anything outside the second. Toggling a device is a pf table update, so it takes effect immediately
-with no ruleset reload.
+The internet switch is two aliases and one rule: an externally-managed alias
+holding the addresses currently denied internet, a companion alias defining
+private address space, and one floating rule blocking the first to anything
+outside the second. Toggling a device is a pf table update, so it takes effect
+immediately with no ruleset reload.
 
 Per-device rules were rejected deliberately: they do not scale, they apply
 slowly, and arbitrary per-device schedules would need one rule per distinct
-schedule. One alias and one rule stays comprehensible at any number of devices.
+schedule. A fixed few objects stay comprehensible at any number of devices: one
+table and one rule for the internet, two tables and two rules for messaging.
 
 Both aliases and the rule are created automatically on first apply and are
 idempotent. The plugin recognises its own objects by a description marker rather
@@ -43,13 +45,19 @@ nothing, so the plugin is inert until you add a device.
   5230, which Google reserves for its notification service
 
 Toggling a device is again a pf table update, with no ruleset reload. The four
-objects are made the first time a device's Messaging setting is anything but Not
-blocked, so a firewall that never uses it gains nothing, and they are found by
-description marker like the rest. Unlike the internet alias, their names are fixed. If an alias with one of those
-names already exists and the plugin did not make it, the plugin does not take it
-over: messaging blocking stays off, the Status tab says why, and the internet
-switch keeps working. For the same reason the internet alias itself cannot be
-named `NoMessaging` or `Messaging_Servers`.
+objects are made the first time a device uses messaging (see Blocking messaging),
+so a firewall that never does gains nothing, and they are found by description
+marker like the rest.
+
+Unlike the internet alias, their names are fixed, and a rename by hand in Firewall →
+Aliases is not followed as it is for that one: the plugin goes on filling the table
+of the fixed name, which no rule uses any more, so the rules that use the renamed
+alias block nothing until it is renamed back. The Status tab reports it, saying
+"messaging alias renamed" with the name the alias has and the name it should have.
+If an alias with one of those names already exists and the plugin did not make it,
+the plugin does not take it over: messaging blocking stays off, the Status tab says
+why, and the internet switch keeps working. For the same reason the internet alias
+itself cannot be named `NoMessaging` or `Messaging_Servers`.
 
 ## Blocking messaging
 
@@ -75,8 +83,11 @@ Which apps count is one list for every device: **Messaging apps to block** under
 Settings, with every app offered below selected by default. Blocked means
 completely blocked: the selected apps stop sending, receiving and calling, since
 calls are set up through the same servers as chats. Deselecting an app unblocks
-it within a minute. Deselecting all of them is allowed, and leaves only the
-notification cut described next.
+it within a minute. That also clears the learned addresses of every app: the apps
+that stay selected are looked up again at once, but the other addresses their names
+had rotated through are lost, and are learned again as the names rotate.
+Deselecting every app is allowed, and leaves only the notification cut described
+next.
 
 ### Notifications
 
@@ -93,11 +104,11 @@ selected, even none**:
 - Microsoft's Windows Notification Service: all traffic to the addresses in
   Microsoft's published list
 
-**That also stops iMessage and incoming FaceTime calls on that device**, because
-both depend on Apple's notification service, along with every other app's
-notifications, for as long as the block lasts. Ordinary phone calls and SMS over
-the mobile network still work. There is no switch for this: it is part of every
-messaging block. Notifications held back may all arrive when it lifts.
+**That also stops iMessage and incoming FaceTime calls on that device**: both use
+Apple's notification service, which carries every app's notifications, so they
+stop with all of them for as long as the block lasts. Ordinary phone calls and SMS
+over the mobile network still work. There is no switch for this: it is part of
+every messaging block. Notifications held back may all arrive when it lifts.
 
 Apart from that, nothing else on the device is touched: web browsing, video,
 iCloud, the app stores, school and work tools such as Teams, and Facebook and
@@ -171,10 +182,10 @@ uses messaging; "Messaging: N server entries · not refreshed yet" until the fir
 refresh has run (Apply runs a sync, which refreshes at once); then "· refreshed
 HH:MM". Behind it come any lookup or download errors and, in red, why messaging
 cannot be enforced at all: a reserved name taken by someone else's alias, a missing
-object, or an unreadable data file. `configctl parentalcontrol status` carries the
-same under a `messaging` key, and per device `messaging`, `messaging_blocked` and
-`messaging_reason`. The existing keys are unchanged, which is what the dashboard
-widget reads.
+object, a messaging alias renamed by hand, or an unreadable data file.
+`configctl parentalcontrol status` carries the same under a `messaging` key, and
+per device `messaging`, `messaging_blocked` and `messaging_reason`. The existing
+keys are unchanged, which is what the dashboard widget reads.
 
 ## Addressing a device
 
@@ -299,11 +310,15 @@ every sync then stops with
     plugin files incomplete (missing lib/markers.php): run 'configctl parentalcontrol install' again
 
 so schedules are not re-evaluated, and devices stay as they were, until the
-install runs **a second time**. The first run also copies the new installer, which
-does the rest. Run `configctl parentalcontrol install` twice in a row, or use the
-codeload bootstrap under Install, which runs the new release's installer from the
-start. From 0.1.0 on this cannot recur, because an installed installer hands over
-to the downloaded release's own.
+install runs **a second time**. That line is not shown in the GUI:
+`configctl parentalcontrol sync` and the Apply button report only "Error (1)", and
+the Status tab stays blank. Running
+`/usr/local/opnsense/scripts/OPNsense/ParentalControl/sync.php` directly prints it.
+The first run also copies the new installer, which does the rest. Run
+`configctl parentalcontrol install` twice in a row, or use the codeload bootstrap
+under Install, which runs the new release's installer from the start. From 0.1.0
+on this cannot recur, because an installed installer hands over to the downloaded
+release's own.
 
 ## Keeping it installed
 
@@ -318,7 +333,7 @@ These files are not owned by a package, so a firmware upgrade can remove them.
   yourself, to reinstate the files after an upgrade removes them. When you are
   upgrading from 0.0.2, do not wait for that job: its first run after the upgrade
   is still made by 0.0.2's installer and leaves every sync failing until the run
-  after it (see Upgrading from 0.0.2). Install once by hand, twice in a row.
+  after it (see Upgrading from 0.0.2). Run the install by hand, twice in a row.
 
 The Status tab flags it in red if that job is ever missing or disabled while the
 plugin is enabled, so a silently-inert install is visible rather than something
@@ -344,11 +359,12 @@ three, empty, until the next reboot. Everything is matched by description marker
 so a renamed alias is still found. Safe to run repeatedly.
 
 **It refuses, and changes nothing, while anything else in the configuration refers
-to one of the plugin's aliases**: a rule of yours with `NoInternet` as its source,
-an alias of yours that lists one, a NAT rule, another plugin's setting, even a
-description that names one as a whole word. Deleting the alias would leave that
-rule pointing at nothing. It prints where each reference is; change those, then
-run it again. The plugin's own rules, aliases, cron job and settings do not count.
+to one of the plugin's aliases**: a rule of yours with the internet alias
+(`NoInternet` by default) as its source, an alias of yours that lists one, a NAT
+rule, another plugin's setting, even a description that names one as a whole word.
+Deleting the alias would leave that rule pointing at nothing. It prints where each
+reference is; change those, then run it again. The plugin's own rules, aliases, cron
+job and settings do not count.
 
 It also waits, for up to 30 seconds, for a running sync to finish, and reads the
 configuration again once it has the sync lock, so that a sync in progress cannot
@@ -361,8 +377,11 @@ removed. The script deletes the data directory, marker included, last, and a new
 install removes the marker. Ctrl-C, hangup and TERM are handled the same way: an
 interrupted run takes its marker away, so syncs carry on and restore anything it had
 already flushed, and running the script again finishes the job. SIGKILL, or a PHP
-without pcntl, can leave the marker behind, which pauses every sync until
-`uninstall.sh` is run again or the plugin is reinstalled.
+without pcntl, can leave the marker behind, which pauses every sync. That is easy to
+miss, because Apply still reports OK (a paused sync exits 0) while nothing changes.
+To notice it, look for the file `/var/db/parentalcontrol/uninstalling`, or run
+`sync.php` directly and read its "uninstall in progress - nothing changed". To clear
+it, run `uninstall.sh` again to finish the removal, or reinstall to keep the plugin.
 
 This genuinely removes the plugin — the menu entry disappears and the widget
 drops off the dashboard. Note that `configctl parentalcontrol install` will not
@@ -375,8 +394,11 @@ Device settings stay in `config.xml`, so reinstalling restores them. Add
 The config-side cleanup is also available on its own as
 `configctl parentalcontrol uninstall` — useful to disable enforcement while
 leaving the plugin installed. It removes the same firewall objects and the cron job
-but not the files, the data directory or the marker, so the next sync puts the
-objects back. Two things to know about it:
+but not the files, the data directory or the marker. With the cron job gone nothing
+syncs by itself, and the Status tab shows the schedule cron as not installed. The
+objects and the cron job come back with the next sync somebody starts: Apply,
+`configctl parentalcontrol sync`, or a flip of the dashboard widget's switch. Two
+things to know about it:
 
 - When it refuses, configctl shows only "Execute error". Run `uninstall.sh` (or
   `uninstall.php`) directly to read why.
@@ -387,9 +409,11 @@ The shell script is deliberately *not* a configd action, because it deletes the
 action file and restarts configd, and a script configd launched would be killed
 partway through that.
 
-If a library file is missing, `sync.php` and `uninstall.php` print one line naming
-it and exit 1 instead of failing inside PHP. That line reaches you only when you
-run them directly: configctl and the GUI show their own error.
+If a library file they need is missing, `sync.php` and `uninstall.php` print one
+line naming it and exit 1 instead of failing inside PHP. That line reaches you only
+when you run them directly: `configctl parentalcontrol sync` and the Apply button
+report only "Error (1)", the Status tab stays blank, and
+`configctl parentalcontrol uninstall` reports only "Execute error".
 
 ## Known limits
 
@@ -444,20 +468,21 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
-dropped, a constant changed. A check that no broken copy could fail was changed
-until one could. The schedule tests had been checked that way against the pre-fix
-logic, which they fail on 4 cases. The counts reported for the rest: 24, 50, 65,
-128 and 8 broken copies of the library, at the five stages `MessagingTest.php` was
-built in; 31 of the data file and 23 of the model for `MessagingDataTest.php`,
-whose alias-name check was also shown failing against the old pattern; and 5 of the
-generator for `BuildMessagingDataTest.py`. Every one was caught except seven in
-`MessagingTest.php`: five behave the same as the original on every input that can
-occur, and two fold the case of alias names, which the tests leave open on purpose.
+dropped, a constant changed. The schedule tests had been checked that way against
+the pre-fix logic, which they fail on 4 cases. The counts reported for the rest:
+24, 50, 65, 128 and 8 broken copies of the library, at the five stages
+`MessagingTest.php` was built in; 31 of the data file and 23 of the model for
+`MessagingDataTest.php`, whose alias-name check was also shown failing against the
+old pattern; and 5 of the generator for `BuildMessagingDataTest.py`. In the first
+three library stages each of the 89 checks was shown failing under at least one
+broken copy. Every broken copy was caught except seven in `MessagingTest.php`: five
+behave the same as the original on every input that can occur, and two fold the case
+of alias names, which the tests leave open on purpose.
 
 **Static analysis (0.1.0)**, on 2026-10-18. PHPStan 2.3.1 at its strictest level
-(9), over the plugin's scripts, library files, controllers and model, with OPNsense
-core 26.7.7's sources and the plugin's own library files and model on its scan
-path, reports 79 findings, none of them a defect:
+(9), over the plugin's scripts, library files, `controllers/` and model, with
+OPNsense core 26.7.7's sources and the plugin's own library files and model on its
+scan path, reports 79 findings, none of them a defect:
 
 - 66 are what it cannot follow in the framework: model fields reached through
   `__get` and iterators typed as `mixed` (35), `Config::getInstance()` typed as
@@ -482,14 +507,15 @@ skips), reports three findings:
   parsing, and a network is skipped.
 - `unlink-use` in `uninstall.php`, on the shutdown function that removes the
   marker. Its argument is the constant path of the marker, never input.
-- `dynamic-urllib-use-detected` in `tools/build-messaging-data.py`. The generator
-  takes its URLs from the committed `tools/messaging-sources.json`, all of them
-  `https`, and from fixed RIPEstat addresses. It is a maintainer's tool, never
-  installed, and reads nothing from outside the repository.
+- `dynamic-urllib-use-detected` in `tools/build-messaging-data.py`. Every URL the
+  generator opens has a fixed scheme and host: they come from the committed
+  `tools/messaging-sources.json`, all of them `https`, or from the
+  `https://stat.ripe.net/` template, whose only variable is the `resource`, an
+  address or an AS number. It is a maintainer's tool and is never installed.
 
-Its bash parser also cannot read `install.sh` in full (`sh -n` and `dash -n` are
-clean on every script). Every function, API action, configd action and installed
-file has a caller.
+Semgrep's bash parser also cannot read `install.sh` in full (`sh -n` and `dash -n`
+are clean on every script). Every function, API action, configd action and
+installed file has a caller.
 
 **Exercised on a development machine, not on OPNsense.** `sync.php` and
 `uninstall.php` were run against stand-ins for OPNsense's model, configuration and

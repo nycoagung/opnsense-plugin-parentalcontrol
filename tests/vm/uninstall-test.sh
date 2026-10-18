@@ -873,7 +873,7 @@ _m=$(missing_files | sed "s#$SCRIPTS/lib/messaging.php ##")
 verdict "missing lib: uninstall.sh stops and removes nothing"
 mv "$W/messaging.php.aside" "$SCRIPTS/lib/messaging.php"
 
-# R35: uninstall takes the sync lock, and gives up after 30 s
+# uninstall takes the sync lock, and gives up after 30 s
 calm
 hold_lock 40 || problem "could not take the lock"
 t0=$(date +%s)
@@ -911,7 +911,7 @@ s=$(csync)
 in_place
 verdict "signals: the next sync applies, everything in place"
 
-# R35: uninstall waits for a running sync, reads the config again, then removes
+# uninstall waits for a running sync, reads the config again, then removes
 calm
 hold_lock 5 || problem "could not take the lock"
 t0=$(date +%s)
@@ -961,7 +961,7 @@ s=$(csync)
 in_place
 verdict "step-5 rehearsal: uninstall then sync leaves the same inventory"
 
-# R37: a sync that waited behind uninstall.php --final changes nothing
+# a sync that waited behind uninstall.php --final changes nothing
 calm
 hold_lock 5 || problem "could not take the lock"
 rm -f "$W/u.out"
@@ -1047,8 +1047,8 @@ removed_checks "uninstall" plugin
 
 section "8 refuses when referenced"
 out=$(sh "$TREE/install.sh" 2>&1) || problem "reinstall: $(oneline "$out")"
-# R18: the objects are made on first use, so messaging must be on before a user
-# rule can name NoMessaging
+# the objects are made on first use, so messaging must be on before a user rule
+# can name NoMessaging
 out=$($PC set vm-test messaging on 2>&1) || problem "set: $(oneline "$out")"
 s=$(csync)
 [ "$s" = OK ] || problem "sync: $s"
@@ -1087,8 +1087,8 @@ if out=$($PC rule-del "$uuid" 2>&1); then RULE=; else problem "$(oneline "$out")
 verdict "refusal: the user rule deleted"
 
 # ---- 8b. uninstall during a sync ----------------------------------------------
-# R37 with uninstall.sh: syncs that waited behind uninstall.php change nothing,
-# whether they find the marker or their own script gone
+# with uninstall.sh: syncs that waited behind uninstall.php change nothing, whether
+# they find the marker or their own script gone
 
 section "8b uninstall during a sync"
 # a refusal that failed above has removed the plugin: put it back first

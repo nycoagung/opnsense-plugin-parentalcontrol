@@ -1,6 +1,6 @@
 # Messaging block: design
 
-Date: 2026-10-18 · Status: draft for approval · Plugin: os-parentalcontrol (current release 0.0.2)
+Date: 2026-10-18 · Status: implemented in 0.1.0, with the changes listed at the end · Plugin: os-parentalcontrol (0.0.2 when this was written)
 
 ## Why
 
@@ -439,11 +439,12 @@ above is left as it was written.
 - **The installer hands over, and a missing file is named.** An installed
   `install.sh` downloads the release and runs that release's own `install.sh`; before,
   it copied only the file list it was installed with, so a release that added files
-  installed incompletely. `sync.php` and `uninstall.php` check each file in `lib/`
-  first and, when one is missing, print "plugin files incomplete (missing lib/...):
-  run 'configctl parentalcontrol install' again" and exit 1. 0.0.2's installer cannot
-  be changed, so upgrading from 0.0.2 needs the install run twice. A missing
-  `messaging.json` is not fatal: messaging reports it and the internet block carries on.
+  installed incompletely. `sync.php` checks each of its four `lib/` files first, and
+  `uninstall.php` the two it needs (`markers.php` and `messaging.php`). When one is
+  missing they print "plugin files incomplete (missing lib/...): run 'configctl
+  parentalcontrol install' again" and exit 1. 0.0.2's installer cannot be changed, so
+  upgrading from 0.0.2 needs the install run twice. A missing `messaging.json` is not
+  fatal: messaging reports it and the internet block carries on.
 - **Uninstall is stricter.**
   - It takes the sync lock, waiting up to 30 seconds for a running sync, and reads the
     configuration again once it holds it, so a sync in progress cannot save its own
@@ -470,8 +471,8 @@ above is left as it was written.
   `learned`, and the two table names. When messaging is not in use, `refreshed_at` is
   null and `errors` is empty, so a time or errors from an earlier use are not shown. The
   summary line says "Messaging: not in use" in that case and "not refreshed yet" when it
-  is in use and no refresh has run: `refreshed_at` is null in both, so it cannot tell
-  them apart.
+  is in use and no refresh has run. `refreshed_at` is null in both, so the Status tab
+  reads `in_use` to choose between the two.
 - **Model version.** The model is version 1.1.0 with no migration. Devices saved by
   0.0.2 load with Messaging at Not blocked, and the app list at its default.
 - **Static analysis found more than the known framework findings.** Verification

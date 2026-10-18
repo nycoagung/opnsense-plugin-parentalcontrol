@@ -615,9 +615,9 @@ check('cache: a refresh time or errors of the wrong type are dropped',
 
 /* ---- refreshErrors --------------------------------------------------------- */
 
-/* the brief's wording, which status shows: lookups in the order given, failed before
-   skipped for each, then the downloads */
-check('errors: lookups, then downloads, as the brief words them',
+/* the wording status shows: lookups in the order given, failed before skipped for
+   each, then the downloads */
+check('errors: lookups, then downloads, in the order shown in status',
     refreshErrors([['failed' => ['a.example'], 'skipped' => ['b.example']],
                    ['failed' => ['p.example'], 'skipped' => ['q.example']]], ['telegram'], []),
     ['lookup failed: a.example', 'lookup skipped (time budget): b.example',
