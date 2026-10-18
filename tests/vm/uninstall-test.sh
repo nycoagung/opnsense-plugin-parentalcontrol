@@ -31,6 +31,8 @@
 #                          leaves, such as an empty <rules/>. The maintainer
 #                          decides whether those count.
 #   SKIP <name>: <reason>  only where a precondition is absent
+# Comparing config.xml with the saved copy leaves out revision metadata: the
+# top-level <revision>, and the persisted_at stamp core puts on a model it saves.
 # A summary follows, and the exit status is 1 if anything failed. The run takes
 # about a quarter of an hour, partly because it waits for moments when cron's
 # per-minute sync is not running.
@@ -221,7 +223,8 @@ trap 'exit 129' HUP
 # ---- canonical config.xml ---------------------------------------------------
 
 # compare_config NAME [plugin]: config.xml against the copy saved by preflight,
-# ignoring the top-level revision, and the plugin's subtree when "plugin" is given
+# ignoring the top-level revision and every persisted_at stamp, and the plugin's
+# subtree when "plugin" is given
 compare_config() {
     if ! _h1=$($PC canon "$W/baseline.xml" "$W/base.xml" ${2:+"$2"}) ||
         ! _h2=$($PC canon "$CONF" "$W/now.xml" ${2:+"$2"}); then
@@ -258,8 +261,8 @@ removed_checks() {          # removed_checks PREFIX [plugin]
     verdict "$1: no plugin object or cron job left"
     compare_config "$1: config.xml equals the saved copy" "${2:-}"
 }
-tables_gone() {             # tables_gone PREFIX
-    for _t in NoInternet NoMessaging Messaging_Servers; do
+tables_gone() {             # tables_gone PREFIX ALIAS: ALIAS is the internet alias's name
+    for _t in "$2" NoMessaging Messaging_Servers; do
         ! pfctl -s Tables 2>/dev/null | grep -qxF "$_t" ||
             problem "still listed: $(pfctl -vs Tables 2>/dev/null | grep -E "[[:space:]]$_t\$" | tr -s '\t ' ' ') ($(count "$_t") entries)"
     done
@@ -441,6 +444,10 @@ switch ($cmd) {
         foreach (iterator_to_array($xp->query($drop)) as $node) {
             $node->parentNode->removeChild($node);
         }
+        /* a model's save stamps it, whatever changed, so like the revision it is metadata */
+        foreach (iterator_to_array($xp->query('//@persisted_at')) as $attr) {
+            $attr->ownerElement->removeAttributeNode($attr);
+        }
         /* "strip": drop every element with neither a child element nor text, until none is left */
         while (in_array('strip', $a, true)
             && ($empty = iterator_to_array($xp->query('/*//*[not(*)][not(normalize-space())]'))) !== []) {
@@ -496,6 +503,11 @@ switch ($cmd) {
             echo $e->getMessage(), "\n";
             exit(1);
         }
+        break;
+    case 'first':               /* first KEY: the first entry of messaging.json's notifications.KEY */
+        $data = json_decode((string)@file_get_contents(DATA_FILE), true);
+        $list = (array)($data['notifications'][$a[0]] ?? []);
+        echo is_string($list[0] ?? null) ? $list[0] : '', "\n";
         break;
     case 'wns':                 /* wns N: the first N WNS /32 entries of messaging.json, bare */
         $data = json_decode((string)@file_get_contents(DATA_FILE), true);
@@ -654,9 +666,10 @@ verdict "configure: an ordinary alias name accepted, nothing saved"
 section "4 enforced"
 listed NoMessaging "$DEV" || problem "NoMessaging: $(tbl NoMessaging | tr '\n' ' ')"
 verdict "enforced: $DEV in NoMessaging"
-listed Messaging_Servers 17.249.0.0/16 || problem "17.249.0.0/16 not listed"
+apple=$($PC first apple_ranges)        # Apple's first range in messaging.json
+{ [ -n "$apple" ] && listed Messaging_Servers "$apple"; } || problem "Apple's first range '$apple' not listed"
 [ "$(count Messaging_Servers)" -ge 2 ] || problem "$(count Messaging_Servers) entries"
-verdict "enforced: Messaging_Servers holds 17.249.0.0/16 and more"
+verdict "enforced: Messaging_Servers holds Apple's first range ($apple) and more"
 for m in 'Parental Control: block messaging' 'Parental Control: block notification ports'; do
     grep -qF -- "$m" /tmp/rules.debug || problem "no '$m'"
 done
@@ -729,8 +742,10 @@ verdict "canonical targets: gone again with their devices"
 # A state is dropped when its device becomes blocked. On a lone VM the device is
 # the VM itself: its own connections leave from its own address. The floating
 # rules match only packets coming in, so blocking that address cuts nothing else.
-# The target is Apple's notification service on 443, inside the shipped ranges,
-# so it is picked by destination; the control goes to a server outside the list.
+# The target is the first notification name in messaging.json, one of Google's,
+# on 443: every refresh looks it up whichever apps are selected, so its addresses
+# are in the list and the connection is picked by destination. The control goes
+# to a server outside the list.
 CONNS=
 conn() {                    # conn NAME HOST PORT: hold a connection; sets C_LOCAL and C_REMOTE
     rm -f "$W/conn-$1"
@@ -739,10 +754,11 @@ conn() {                    # conn NAME HOST PORT: hold a connection; sets C_LOC
     CONNS="$CONNS $!"
     wait_file "$W/conn-$1" 15 && read -r C_LOCAL C_REMOTE _rest < "$W/conn-$1" && [ "$C_LOCAL" != fail ]
 }
-if ! conn target courier.push.apple.com 443; then
-    skip "drops" "no connection to courier.push.apple.com:443: $(cat "$W/conn-target" 2>/dev/null)"
+push=$($PC first google_hosts)
+if [ -z "$push" ] || ! conn target "$push" 443; then
+    skip "drops" "no connection to ${push:-the first notification name}:443: $(cat "$W/conn-target" 2>/dev/null)"
 elif ! pfctl -t Messaging_Servers -T test "${C_REMOTE%:*}" > /dev/null 2>&1; then
-    skip "drops" "${C_REMOTE%:*} (courier.push.apple.com) is not in Messaging_Servers"
+    skip "drops" "${C_REMOTE%:*} ($push) is not in Messaging_Servers"
 elif ! has_state "$C_LOCAL"; then
     skip "drops" "pf shows no state for the VM's own connection $C_LOCAL"
 else
@@ -793,6 +809,7 @@ if cp -p /etc/resolv.conf "$W/resolv.conf.orig"; then
     esac
     verdict "resolver down: status reports the failed lookups"
 else
+    rm -f "$W/resolv.conf.orig"        # a partial copy: the trap must not put it back
     fail "resolver down: sync exits 0 within 60 s" "could not save a copy of /etc/resolv.conf, so it was left alone"
     skip "resolver down: status reports the failed lookups" "no sync ran with the resolver down"
 fi
@@ -1038,7 +1055,7 @@ calm
 out=$(sh "$SCRIPTS/uninstall.sh" 2>&1); rc=$?
 [ "$rc" = 0 ] || problem "exit $rc: $(oneline "$out")"
 verdict "uninstall: uninstall.sh exits 0"
-tables_gone "uninstall"
+tables_gone "uninstall" NoInternet
 grep -qF '<name>vm-test</name>' "$CONF" || problem "vm-test is gone from config.xml"
 verdict "uninstall: device settings kept"
 removed_checks "uninstall" plugin
@@ -1111,7 +1128,7 @@ release
 verdict "uninstall during a sync: a sync that waited changes nothing"
 [ "$urc" = 0 ] || problem "exit $urc: $(oneline "$(cat "$W/u.out")")"
 verdict "uninstall during a sync: uninstall.sh exits 0"
-tables_gone "uninstall during a sync"
+tables_gone "uninstall during a sync" NoInternet
 removed_checks "uninstall during a sync" plugin
 
 # ---- 9. purge -----------------------------------------------------------------
@@ -1131,6 +1148,7 @@ out=$(sh "$SCRIPTS/uninstall.sh" --purge 2>&1); rc=$?
 ! printf '%s\n' "$out" | grep -qF 'OPNsense/cron/jobs/job/command' || problem "refused over the cron job's command"
 printf '%s\n' "$out" | grep -qF 'device settings removed' || problem "said: $(oneline "$out")"
 verdict "purge: uninstall.sh --purge exits 0 with no refusal"
+tables_gone "purge" sync
 ! grep -q '<ParentalControl' "$CONF" || problem "settings left in config.xml"
 verdict "purge: settings removed"
 removed_checks "purge"
