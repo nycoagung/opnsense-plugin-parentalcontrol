@@ -39,10 +39,14 @@ use OPNsense\ParentalControl\ParentalControl;
    assumption about this particular network, so it stays correct anywhere. */
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
-require_once(__DIR__ . '/lib/markers.php');
-require_once(__DIR__ . '/lib/messaging.php');
-require_once(__DIR__ . '/lib/firewall.php');
-require_once(__DIR__ . '/lib/serverlist.php');
+foreach (['markers.php', 'messaging.php', 'firewall.php', 'serverlist.php'] as $lib) {
+    /* an older installer's file list leaves out the files added since */
+    if (!is_file(__DIR__ . "/lib/$lib")) {
+        fwrite(STDERR, "plugin files incomplete (missing lib/$lib): run 'configctl parentalcontrol install' again\n");
+        exit(1);
+    }
+    require_once(__DIR__ . "/lib/$lib");
+}
 
 /* the messaging aliases' fixed names, each with the marker that makes it ours */
 const MSG_ALIASES = [MSG_DEVICES_ALIAS => MARK_MSG_DEVICES, MSG_SERVERS_ALIAS => MARK_MSG_SERVERS];
