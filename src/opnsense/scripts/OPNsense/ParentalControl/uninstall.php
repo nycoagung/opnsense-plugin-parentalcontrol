@@ -14,8 +14,9 @@
  *
  * Order matters. The pf tables are flushed and the rules deleted before the
  * aliases go, so nothing is left blocked by an object that no longer has an
- * owner. Everything is matched by description marker, so a renamed alias is
- * still found.
+ * owner, and the tables themselves are removed once the reload has dropped the
+ * rules that used them. Everything is matched by description marker, so a
+ * renamed alias is still found.
  *
  * With --final, as uninstall.sh runs it before removing the files, a run that
  * removes everything also leaves UNINSTALL_MARKER behind: until the next install,
@@ -193,6 +194,15 @@ if (!empty($ruleUuids) || !empty($aliasUuids) || !empty($jobUuids)) {
 }
 if (!empty($ruleUuids) || !empty($aliasUuids)) {
     $backend->configdRun('filter reload');
+}
+/* 7. the emptied tables themselves. Core declares every alias table "persist", and
+      its own clean-up skips external aliases, so pf keeps them until they are
+      killed - only now, when no loaded rule uses them. A table pf does not list
+      answers an error, which is no failure here. */
+foreach ($tables as $name) {
+    if (trim($backend->configdpRun('filter kill table', [$name])) === 'OK') {
+        $removed[] = "removed table $name";
+    }
 }
 if (!empty($jobUuids)) {
     $backend->configdRun('cron restart');
