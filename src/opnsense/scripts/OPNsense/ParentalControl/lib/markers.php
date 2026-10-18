@@ -26,10 +26,11 @@ const MSG_DEVICES_ALIAS = 'NoMessaging';
 const MSG_SERVERS_ALIAS = 'Messaging_Servers';
 
 /* Google reserves these TCP ports for its push-notification service, so one
-   rule blocks them to any destination. */
-const NOTIFY_PORTS   = '5228-5230';
+   rule blocks them to any destination. The range is built from the two bounds
+   so the three cannot drift apart. */
 const NOTIFY_PORT_LO = 5228;
 const NOTIFY_PORT_HI = 5230;
+const NOTIFY_PORTS   = NOTIFY_PORT_LO . '-' . NOTIFY_PORT_HI;
 
 /* The plugin's own state (the learned server list), kept out of config.xml. */
 const DATA_DIR = '/var/db/parentalcontrol';
