@@ -25,9 +25,7 @@ use OPNsense\Cron\Cron;
 use OPNsense\Firewall\Alias;
 use OPNsense\Firewall\Filter;
 
-const MARK_BLOCK = 'Parental Control: devices currently denied internet';
-const MARK_LOCAL = 'Parental Control: local networks';
-const MARK_RULE  = 'Parental Control: block internet';
+require_once(__DIR__ . '/lib/markers.php');
 
 $backend = new Backend();
 $removed = [];

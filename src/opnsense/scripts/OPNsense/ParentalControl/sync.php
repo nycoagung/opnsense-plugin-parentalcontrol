@@ -33,15 +33,7 @@ use OPNsense\ParentalControl\ParentalControl;
    assumption about this particular network, so it stays correct anywhere. */
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
-/* The plugin finds its own alias and rule by these description prefixes rather
-   than by name. Names are user-editable, so matching on them means a rename
-   silently orphans the old objects - leaving whatever was blocked blocked
-   forever, with nothing in the UI explaining why. Prefixes are used so an
-   existing install whose rule description still embeds the old alias name is
-   still recognised. */
-const MARK_BLOCK = 'Parental Control: devices currently denied internet';
-const MARK_LOCAL = 'Parental Control: local networks';
-const MARK_RULE  = 'Parental Control: block internet';
+require_once(__DIR__ . '/lib/markers.php');
 
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
    which would shift every window by the UTC offset while the UI agreed with

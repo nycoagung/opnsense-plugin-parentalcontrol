@@ -1,0 +1,35 @@
+<?php
+
+/**
+ * Names, description markers and paths shared by sync.php and uninstall.php.
+ * Constants only, so any script or test can load this anywhere PHP runs.
+ */
+
+/* The plugin finds its own alias and rule by these description prefixes rather
+   than by name. Names are user-editable, so matching on them means a rename
+   silently orphans the old objects - leaving whatever was blocked blocked
+   forever, with nothing in the UI explaining why. Prefixes are used so an
+   existing install whose rule description still embeds the old alias name is
+   still recognised. */
+const MARK_BLOCK = 'Parental Control: devices currently denied internet';
+const MARK_LOCAL = 'Parental Control: local networks';
+const MARK_RULE  = 'Parental Control: block internet';
+
+/* The messaging block's objects, found the same way. */
+const MARK_MSG_DEVICES = 'Parental Control: devices currently denied messaging';
+const MARK_MSG_SERVERS = 'Parental Control: messaging servers';
+const MARK_MSG_RULE    = 'Parental Control: block messaging';
+const MARK_NOTIFY_RULE = 'Parental Control: block notification ports';
+
+/* Unlike the whole-internet alias, whose name is a setting, these are fixed. */
+const MSG_DEVICES_ALIAS = 'NoMessaging';
+const MSG_SERVERS_ALIAS = 'Messaging_Servers';
+
+/* Google reserves these TCP ports for its push-notification service, so one
+   rule blocks them to any destination. */
+const NOTIFY_PORTS   = '5228-5230';
+const NOTIFY_PORT_LO = 5228;
+const NOTIFY_PORT_HI = 5230;
+
+/* The plugin's own state (the learned server list), kept out of config.xml. */
+const DATA_DIR = '/var/db/parentalcontrol';
