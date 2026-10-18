@@ -1,5 +1,107 @@
 {
   "apps": {
+    "facebook_instagram": {
+      "hosts": [
+        "edge-mqtt.facebook.com",
+        "mqtt-mini.facebook.com",
+        "gateway.facebook.com",
+        "gateway.messenger.com",
+        "gateway.instagram.com",
+        "chat-e2ee.facebook.com",
+        "chat-e2ee-mini.facebook.com",
+        "web-chat-e2ee.facebook.com",
+        "z-p42-chat-e2ee-ig.facebook.com",
+        "facebook.com",
+        "www.facebook.com",
+        "m.facebook.com",
+        "b-graph.facebook.com",
+        "b-api.facebook.com",
+        "graph.facebook.com",
+        "api.facebook.com",
+        "edge-chat.facebook.com",
+        "rupload.facebook.com",
+        "messenger.com",
+        "www.messenger.com",
+        "edge-chat.messenger.com",
+        "m.me",
+        "instagram.com",
+        "www.instagram.com",
+        "b.i.instagram.com",
+        "i.instagram.com",
+        "graph.instagram.com",
+        "graphql.instagram.com",
+        "edge-chat.instagram.com",
+        "iglite-z.instagram.com",
+        "star.fallback.c10r.facebook.com",
+        "star-mini.fallback.c10r.facebook.com",
+        "mqtt.fallback.c10r.facebook.com",
+        "dgw.fallback.c10r.facebook.com",
+        "chat-e2ee-fallback.facebook.com",
+        "chat-e2ee-mini-fallback.facebook.com",
+        "b-fallback.i.instagram.com",
+        "i-fallback.instagram.com",
+        "graph-fallback.instagram.com",
+        "scontent.xx.fbcdn.net",
+        "video.xx.fbcdn.net",
+        "scontent.cdninstagram.com"
+      ],
+      "label": "Facebook & Instagram",
+      "ranges": [],
+      "ranges_url": null
+    },
+    "kakaotalk": {
+      "hosts": [
+        "booking-loco.kakao.com",
+        "ticket-loco.kakao.com",
+        "katalk.kakao.com",
+        "talk-pilsner.kakao.com"
+      ],
+      "label": "KakaoTalk",
+      "ranges": [
+        "1.201.0.0/24",
+        "27.0.236.0/22",
+        "103.246.57.0/24",
+        "113.29.189.0/24",
+        "121.53.80.0/20",
+        "121.53.104.0/21",
+        "121.53.176.0/23",
+        "121.53.180.0/23",
+        "121.53.200.0/21",
+        "121.53.216.0/21",
+        "121.53.230.0/23",
+        "121.53.234.0/23",
+        "121.53.236.0/22",
+        "121.53.240.0/21",
+        "139.150.1.0/24",
+        "203.133.184.0/21",
+        "210.220.70.0/24",
+        "210.220.73.0/24",
+        "210.220.74.0/24",
+        "210.220.79.0/24",
+        "210.220.86.0/24",
+        "210.220.95.0/24",
+        "211.183.208.0/20",
+        "211.183.244.0/22",
+        "211.231.97.0/24",
+        "211.231.98.0/23",
+        "211.231.100.0/22",
+        "211.231.104.0/22",
+        "211.231.108.0/24",
+        "211.231.111.0/24",
+        "211.242.11.0/24",
+        "211.242.12.0/22",
+        "211.242.16.0/23",
+        "211.249.200.0/22",
+        "211.249.204.0/23",
+        "211.249.207.0/24",
+        "211.249.216.0/21",
+        "211.249.240.0/20",
+        "219.249.231.0/24",
+        "220.64.96.0/20",
+        "220.64.144.0/22"
+      ],
+      "ranges_url": null
+    },
     "line": {
       "hosts": [
         "legy.line-apps.com",
@@ -50,6 +152,34 @@
       ],
       "ranges_url": "https://core.telegram.org/resources/cidr.txt"
     },
+    "viber": {
+      "hosts": [
+        "aloha.viber.com",
+        "aloha46.viber.com",
+        "api.viber.com",
+        "fast.viber.com",
+        "media.api.viber.com"
+      ],
+      "label": "Viber",
+      "ranges": [
+        "3.67.81.0/27",
+        "3.101.175.128/27",
+        "3.112.85.80/29",
+        "3.209.202.16/28",
+        "13.55.255.224/27",
+        "18.192.196.192/29",
+        "18.195.4.0/23",
+        "34.232.163.64/28",
+        "35.74.77.32/27",
+        "35.154.63.192/27",
+        "44.192.201.128/25",
+        "44.192.202.0/25",
+        "52.0.252.0/22",
+        "52.215.218.104/29",
+        "52.220.255.240/28"
+      ],
+      "ranges_url": null
+    },
     "whatsapp": {
       "hosts": [
         "g.whatsapp.net",
@@ -83,7 +213,7 @@
       "ranges_url": null
     }
   },
-  "generated": "2026-10-18",
+  "generated": "2026-10-19",
   "notifications": {
     "apple_ranges": [
       "17.249.0.0/16",
@@ -146,6 +276,9 @@
     "edge-mqtt.facebook.com",
     "www.instagram.com",
     "i.instagram.com",
+    "g.whatsapp.net",
+    "web.whatsapp.com",
+    "mmg.whatsapp.net",
     "www.apple.com",
     "www.icloud.com",
     "gateway.icloud.com",
@@ -163,6 +296,17 @@
     "outlook.office365.com",
     "teams.microsoft.com"
   ],
+  "protected_owners": {
+    "edge-mqtt.facebook.com": "facebook_instagram",
+    "facebook.com": "facebook_instagram",
+    "g.whatsapp.net": "whatsapp",
+    "graph.facebook.com": "facebook_instagram",
+    "i.instagram.com": "facebook_instagram",
+    "mmg.whatsapp.net": "whatsapp",
+    "web.whatsapp.com": "whatsapp",
+    "www.facebook.com": "facebook_instagram",
+    "www.instagram.com": "facebook_instagram"
+  },
   "schema": 1,
   "shared_cdn_ranges": [
     "2.16.0.0/13",

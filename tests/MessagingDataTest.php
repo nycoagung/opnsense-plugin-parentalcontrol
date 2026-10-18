@@ -65,12 +65,58 @@ check('data: every app has a host name',
     array_keys(array_filter($apps, fn($app): bool => !is_array($app) || ($app['hosts'] ?? []) === [])),
     []);
 
-/* a name both resolved for blocking and protected would have every address dropped */
-check('data: hosts not protected',
-    array_values(array_intersect(
-        array_merge($appHosts, $notes['google_hosts'] ?? [], $notes['microsoft_hosts'] ?? []),
-        $data['protected_hosts'] ?? [])),
+/* A name both resolved for blocking and protected would have every address dropped,
+   unless the protected name belongs to the app that lists it: then it protects only
+   while that app is not selected. A notification name is never protected. */
+$owners = $data['protected_owners'] ?? [];
+$protectedHosts = $data['protected_hosts'] ?? [];
+check('data: a host that is also protected belongs to the app that lists it',
+    array_merge(
+        ...array_map(fn(string $id, array $app): array => array_values(array_filter(
+            array_intersect($app['hosts'] ?? [], $protectedHosts),
+            fn(string $host): bool => ($owners[$host] ?? null) !== $id)), array_keys($apps), $apps),
+        ...[array_values(array_intersect(
+            array_merge($notes['google_hosts'] ?? [], $notes['microsoft_hosts'] ?? []), $protectedHosts))]),
     []);
+
+check('apps: the three new apps with their labels',
+    array_map(fn(string $id): ?string => $apps[$id]['label'] ?? null,
+        ['facebook_instagram' => 'facebook_instagram', 'kakaotalk' => 'kakaotalk', 'viber' => 'viber']),
+    ['facebook_instagram' => 'Facebook & Instagram', 'kakaotalk' => 'KakaoTalk', 'viber' => 'Viber']);
+
+/* Instagram's messages travel over Facebook's gateway and realtime servers, so the one
+   entry must hold those as well as each app's own API names; Meta's address blocks also
+   hold WhatsApp's addresses, so the entry ships no ranges */
+$fbig = $apps['facebook_instagram'] ?? [];
+check('apps: facebook_instagram holds the shared messaging endpoints',
+    [array_values(array_diff(['gateway.instagram.com', 'edge-mqtt.facebook.com', 'i.instagram.com',
+        'graph.facebook.com'], $fbig['hosts'] ?? [])), $fbig['ranges'] ?? null],
+    [[], []]);
+check('apps: facebook_instagram lists realtime first',
+    array_slice($fbig['hosts'] ?? [], 0, 2),
+    ['edge-mqtt.facebook.com', 'mqtt-mini.facebook.com']);
+check('apps: facebook_instagram lists no Oculus, Threads or ISP-cache names',
+    array_values(array_filter($fbig['hosts'] ?? [], fn(string $h): bool =>
+        str_contains($h, 'oculus') || str_contains($h, 'threads.') || str_ends_with($h, '.fna.fbcdn.net'))),
+    []);
+check('apps: viber does not list its help desk',
+    in_array('noc-vo.viber.com', $apps['viber']['hosts'] ?? [], true),
+    false);
+
+check('owners: every owned name is protected and every owner is an app',
+    [array_values(array_diff(array_keys($owners), $protectedHosts)),
+     array_values(array_diff(array_unique(array_values($owners)), array_keys($apps)))],
+    [[], []]);
+check('owners: the six Meta names belong to facebook_instagram',
+    array_map(fn(string $h): ?string => $owners[$h] ?? null,
+        ['facebook.com', 'www.facebook.com', 'graph.facebook.com', 'edge-mqtt.facebook.com',
+         'www.instagram.com', 'i.instagram.com']),
+    array_fill(0, 6, 'facebook_instagram'));
+/* so that selecting Facebook & Instagram can never take WhatsApp down */
+check('owners: WhatsApp\'s own names are protected and belong to whatsapp',
+    array_map(fn(string $h): array => [in_array($h, $protectedHosts, true), $owners[$h] ?? null],
+        ['g.whatsapp.net', 'web.whatsapp.com', 'mmg.whatsapp.net']),
+    array_fill(0, 3, [true, 'whatsapp']));
 
 /* the design's own examples of names that must stay reachable: without them, an app
    address shared with Facebook or Instagram would be blocked, and nothing would say so */
@@ -82,11 +128,11 @@ check('data: protected names include Facebook\'s and Instagram\'s',
     []);
 
 /* left out on purpose: Signal's and Snapchat's names on shared front ends, and apps
-   that are not offered */
+   that are not offered (Messenger is offered now, inside Facebook & Instagram) */
 check('data: excluded names absent',
     array_values(array_intersect(
         ['storage.signal.org', 'cdn.signal.org', 'cdn2.signal.org', 'cdn3.signal.org', 'cf-st.sc-cdn.net',
-         'messenger.com', 'www.messenger.com', 'discord.com', 'kik.com'],
+         'discord.com', 'kik.com'],
         $appHosts)),
     []);
 
@@ -125,8 +171,25 @@ check('data: lists non-empty',
         'microsoft_ranges' => $notes['microsoft_ranges'] ?? [],
         'shared_cdn_ranges' => $shared,
         'telegram ranges' => $apps['telegram']['ranges'] ?? [],
+        'kakaotalk ranges' => $apps['kakaotalk']['ranges'] ?? [],
+        'viber ranges' => $apps['viber']['ranges'] ?? [],
     ], fn(array $list): bool => $list === [])),
     []);
+
+/* KakaoTalk's and Viber's ranges are blocked as they are: each must be no wider than
+   /8 and overlap no shared CDN and no notification range, either way round */
+$overlaps = fn(string $a, string $b): bool => ipv4InCidr($network($a), $b) || ipv4InCidr($network($b), $a);
+$guarded = array_merge($shared, $notes['apple_ranges'] ?? [], $notes['microsoft_ranges'] ?? []);
+check('ranges: kakaotalk and viber ranges are at most /8 wide and clear of CDNs and notification ranges',
+    array_values(array_filter(
+        array_merge($apps['kakaotalk']['ranges'] ?? [], $apps['viber']['ranges'] ?? []),
+        fn(string $c): bool => (int)explode('/', $c)[1] < 8
+            || array_filter($guarded, fn(string $o): bool => $overlaps($c, $o)) !== [])),
+    []);
+/* the chat entry point, aloha.viber.com, sits in Viber's own registered block */
+check('ranges: viber holds the chat entry block',
+    ipv4InAny('52.0.252.1', $apps['viber']['ranges'] ?? []),
+    true);
 
 check('data: cdn guard covers cloudflare', ipv4InAny('104.16.0.1', $shared), true);
 

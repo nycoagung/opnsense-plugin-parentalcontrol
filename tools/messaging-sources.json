@@ -31,17 +31,57 @@
         "e13.whatsapp.net", "e14.whatsapp.net", "e15.whatsapp.net", "e16.whatsapp.net"
       ],
       "ranges_url": null
+    },
+    "facebook_instagram": {
+      "label": "Facebook & Instagram",
+      "hosts": [
+        "edge-mqtt.facebook.com", "mqtt-mini.facebook.com",
+        "gateway.facebook.com", "gateway.messenger.com", "gateway.instagram.com",
+        "chat-e2ee.facebook.com", "chat-e2ee-mini.facebook.com", "web-chat-e2ee.facebook.com",
+        "z-p42-chat-e2ee-ig.facebook.com",
+        "facebook.com", "www.facebook.com", "m.facebook.com", "b-graph.facebook.com",
+        "b-api.facebook.com", "graph.facebook.com", "api.facebook.com", "edge-chat.facebook.com",
+        "rupload.facebook.com",
+        "messenger.com", "www.messenger.com", "edge-chat.messenger.com", "m.me",
+        "instagram.com", "www.instagram.com", "b.i.instagram.com", "i.instagram.com",
+        "graph.instagram.com", "graphql.instagram.com", "edge-chat.instagram.com",
+        "iglite-z.instagram.com",
+        "star.fallback.c10r.facebook.com", "star-mini.fallback.c10r.facebook.com",
+        "mqtt.fallback.c10r.facebook.com", "dgw.fallback.c10r.facebook.com",
+        "chat-e2ee-fallback.facebook.com", "chat-e2ee-mini-fallback.facebook.com",
+        "b-fallback.i.instagram.com", "i-fallback.instagram.com", "graph-fallback.instagram.com",
+        "scontent.xx.fbcdn.net", "video.xx.fbcdn.net", "scontent.cdninstagram.com"
+      ],
+      "ranges_url": null
+    },
+    "kakaotalk": {
+      "label": "KakaoTalk",
+      "hosts": ["booking-loco.kakao.com", "ticket-loco.kakao.com", "katalk.kakao.com", "talk-pilsner.kakao.com"],
+      "ranges_sources": [{"ripestat_asn": 7625}, {"ripestat_asn": 18160}, {"ripestat_asn": 38099},
+                         {"ripestat_asn": 152199}]
+    },
+    "viber": {
+      "label": "Viber",
+      "hosts": ["aloha.viber.com", "aloha46.viber.com", "api.viber.com", "fast.viber.com", "media.api.viber.com"],
+      "ranges_sources": [{"arin_name": "AWS-VIBER-MEDIA"}, {"arin_name": "AWS-VIBER"}]
     }
   },
   "protected_hosts": [
     "facebook.com", "www.facebook.com", "graph.facebook.com", "edge-mqtt.facebook.com",
     "www.instagram.com", "i.instagram.com",
+    "g.whatsapp.net", "web.whatsapp.com", "mmg.whatsapp.net",
     "www.apple.com", "www.icloud.com", "gateway.icloud.com", "setup.icloud.com",
     "www.google.com", "www.youtube.com", "www.googleapis.com", "play.googleapis.com",
     "android.clients.google.com", "classroom.google.com", "connectivitycheck.gstatic.com",
     "www.microsoft.com", "login.live.com", "login.microsoftonline.com", "outlook.office365.com",
     "teams.microsoft.com"
   ],
+  "protected_owners": {
+    "facebook.com": "facebook_instagram", "www.facebook.com": "facebook_instagram",
+    "graph.facebook.com": "facebook_instagram", "edge-mqtt.facebook.com": "facebook_instagram",
+    "www.instagram.com": "facebook_instagram", "i.instagram.com": "facebook_instagram",
+    "g.whatsapp.net": "whatsapp", "web.whatsapp.com": "whatsapp", "mmg.whatsapp.net": "whatsapp"
+  },
   "notifications": {
     "apple_ranges": ["17.249.0.0/16", "17.252.0.0/16", "17.57.144.0/22", "17.188.128.0/18", "17.188.20.0/23"],
     "google_hosts": [

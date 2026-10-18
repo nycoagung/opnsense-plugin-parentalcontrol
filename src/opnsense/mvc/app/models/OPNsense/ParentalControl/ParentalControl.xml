@@ -20,12 +20,15 @@
             </kill_states>
             <messaging_apps type="OptionField">
                 <Multiple>Y</Multiple>
-                <Default>line,signal,snapchat,telegram,whatsapp</Default>
+                <Default>facebook_instagram,kakaotalk,line,signal,snapchat,telegram,viber,whatsapp</Default>
                 <OptionValues>
+                    <facebook_instagram>Facebook &amp; Instagram</facebook_instagram>
+                    <kakaotalk>KakaoTalk</kakaotalk>
                     <line>LINE</line>
                     <signal>Signal</signal>
                     <snapchat>Snapchat</snapchat>
                     <telegram>Telegram</telegram>
+                    <viber>Viber</viber>
                     <whatsapp>WhatsApp</whatsapp>
                 </OptionValues>
             </messaging_apps>
