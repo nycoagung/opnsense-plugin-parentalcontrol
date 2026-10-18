@@ -19,6 +19,8 @@
 #
 # If this script is run from an already-extracted archive it installs from there
 # rather than downloading again, so the bootstrap above costs exactly one fetch.
+# Run from anywhere else (the installed copy, which configctl runs), it downloads
+# the archive and hands over to the install.sh inside it.
 set -e
 
 GH_OWNER="${GH_OWNER:-nycoagung}"
@@ -69,9 +71,15 @@ MODEL_BEFORE=$(hash_of "$M/ParentalControl.xml")
 
 HERE=$(dirname "$0")
 CLEAN=""
+# a download is removed however this ends - except by the exec below, which hands it on
+trap '[ -z "$CLEAN" ] || rm -rf "$CLEAN"' EXIT
 if [ -d "$HERE/$P" ]; then
     SRC="$HERE"
     echo "installing from $SRC"
+    # handed over by an installed copy (below): the download is this tree's parent
+    if [ "$(dirname "$HERE")" = "${PC_INSTALL_TMP:-}" ]; then
+        case "$PC_INSTALL_TMP" in /tmp/pcinst.*) CLEAN="$PC_INSTALL_TMP" ;; esac
+    fi
 else
     TMP=$(mktemp -d /tmp/pcinst.XXXXXX)
     CLEAN="$TMP"
@@ -80,7 +88,14 @@ else
         "https://codeload.github.com/${GH_OWNER}/${GH_REPO}/tar.gz/refs/heads/${GH_REF}"
     tar -xzf "$TMP/src.tgz" -C "$TMP"
     SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)
-    [ -n "$SRC" ] && [ -d "$SRC/$P" ] || { echo "archive did not contain $P" >&2; exit 1; }
+    [ -n "$SRC" ] && [ -d "$SRC/$P" ] && [ -f "$SRC/install.sh" ] ||
+        { echo "archive did not contain $P and install.sh" >&2; exit 1; }
+    # Hand over to the downloaded installer. This copy's FILES list is the one it
+    # was installed with, always the previous release's, so it would leave out
+    # any file a newer release adds. The new copy runs from the unpacked tree, so
+    # it installs from there and never fetches; it removes the download when done.
+    export PC_INSTALL_TMP="$TMP"
+    exec sh "$SRC/install.sh"
 fi
 
 # Check the whole set is present before touching anything on disk, so a
