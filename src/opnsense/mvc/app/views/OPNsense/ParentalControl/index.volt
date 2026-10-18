@@ -122,10 +122,13 @@
         var loadStatus = function () {
             ajaxGet("/api/parentalcontrol/service/status", {}, function (data) {
                 if (data === undefined || data.devices === undefined) { return; }
-                var rows = data.devices.map(function (d) {
-                    var badge = d.blocked
+                var esc = function (v) { return $('<div>').text(v).html(); };
+                var badgeOf = function (blocked) {
+                    return blocked
                         ? '<span class="label label-danger">{{ lang._("blocked") }}</span>'
                         : '<span class="label label-success">{{ lang._("allowed") }}</span>';
+                };
+                var rows = data.devices.map(function (d) {
                     // a MAC only means something once resolved, so show what it
                     // actually matched rather than just the configured value
                     var addr = $('<div>').text(d.address).html();
@@ -137,7 +140,9 @@
                     return '<tr><td>' + $('<div>').text(d.name).html() + '</td>' +
                            '<td>' + addr + '</td>' +
                            '<td>' + $('<div>').text(d.reason).html() + '</td>' +
-                           '<td>' + badge + '</td></tr>';
+                           '<td>' + badgeOf(d.blocked) + '</td>' +
+                           '<td>' + badgeOf(d.messaging_blocked) +
+                           ' <small class="text-muted">' + esc(d.messaging_reason) + '</small></td></tr>';
                 }).join('');
                 $("#status-body").html(rows);
                 $("#status-alias").text(data.alias + ' (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
@@ -149,6 +154,22 @@
                 }
                 $("#status-cron").html(warn.length
                     ? ' &middot; <span class="text-danger">' + warn.join(' &middot; ') + '</span>' : '');
+                // refreshed_at is null whenever messaging is not in use
+                var m = data.messaging || {};
+                var errs = m.errors || [];
+                var problems = errs.slice(0, 3).map(esc);
+                if (errs.length > 3) {
+                    problems.push("{{ lang._('and %s more') }}".replace('%s', esc(errs.length - 3)));
+                }
+                if (m.error) {
+                    problems.unshift('<span class="text-danger">' + esc(m.error) + '</span>');
+                }
+                $("#status-messaging").html(' &middot; ' + (m.refreshed_at
+                    ? "{{ lang._('Messaging: %s server entries') }}".replace('%s', esc(m.entries)) + ' &middot; ' +
+                      "{{ lang._('refreshed %s') }}".replace('%s', esc(new Date(m.refreshed_at * 1000)
+                          .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
+                    : "{{ lang._('Messaging: not in use') }}") +
+                    (problems.length ? ' &middot; ' + problems.join(' &middot; ') : ''));
             });
         };
         loadStatus();
@@ -205,9 +226,10 @@
                     {# the summary row lives inside the table so it lines up with
                        the columns by construction, rather than by guessing padding #}
                     <tr>
-                        <th colspan="3" style="border-bottom: none;">
+                        <th colspan="4" style="border-bottom: none;">
                             {{ lang._('Alias') }}: <span id="status-alias">-</span>
                             <span id="status-cron" class="text-muted"></span>
+                            <span id="status-messaging"></span>
                         </th>
                         <th style="border-bottom: none; text-align: right;">
                             <button id="refreshStatus" type="button" class="btn btn-xs btn-default">
@@ -220,6 +242,7 @@
                         <th>{{ lang._('Address') }}</th>
                         <th>{{ lang._('Reason') }}</th>
                         <th>{{ lang._('State') }}</th>
+                        <th>{{ lang._('Messaging') }}</th>
                     </tr>
                 </thead>
                 <tbody id="status-body"></tbody>
