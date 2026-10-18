@@ -2,7 +2,8 @@
 
 /**
  * Pure functions for the messaging block: the per-device decision, the IPv4
- * helpers and the builders of the server list.
+ * helpers, the builders of the server list, the choice of connections to drop and
+ * the two checks setup and uninstall make before touching an alias.
  *
  * No I/O, no side effects and no OPNsense classes, so this file loads anywhere
  * PHP runs: on the firewall from sync.php, and from tests/MessagingTest.php on
@@ -40,17 +41,27 @@ function messagingDecision(bool $pluginEnabled, bool $deviceEnabled, string $set
 }
 
 /**
- * A bare IPv4 address, or a.b.c.d/n with n from 0 to 32.
+ * A bare IPv4 address in strict dotted-quad form: no prefix, no leading zeros.
  *
- * The address goes through filter_var, not ip2long(): ip2long() reads
- * '192.0.2.010' as 192.0.2.10 while inet_aton reads it as 192.0.2.8, and one
- * range meaning two networks is how the wrong thing gets blocked.
+ * The one place this rule lives. Everything that needs to know whether a string is
+ * an address asks here, so two parts of the plugin cannot come to disagree about
+ * it. It goes through filter_var, not ip2long(): ip2long() reads '192.0.2.010' as
+ * 192.0.2.10 while inet_aton reads it as 192.0.2.8, and one range meaning two
+ * networks is how the wrong thing gets blocked.
+ */
+function isIpv4(string $s): bool
+{
+    return filter_var($s, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+}
+
+/**
+ * A bare IPv4 address, or a.b.c.d/n with n from 0 to 32.
  */
 function isIpv4Cidr(string $s): bool
 {
     $p = explode('/', $s);
     return count($p) <= 2
-        && filter_var($p[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+        && isIpv4($p[0])
         && (count($p) === 1 || (ctype_digit($p[1]) && (int)$p[1] <= 32));
 }
 
@@ -60,7 +71,7 @@ function isIpv4Cidr(string $s): bool
  */
 function ipv4InCidr(string $ip, string $cidr): bool
 {
-    if (!isIpv4Cidr($cidr) || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+    if (!isIpv4Cidr($cidr) || !isIpv4($ip)) {
         return false;
     }
     [$net, $bits] = array_pad(explode('/', $cidr), 2, '32');
@@ -112,10 +123,11 @@ function parseRanges(string $text): array
  * Split this run's DNS answers into the addresses to learn and the ones to leave
  * alone.
  *
- * An address that a protected name resolved to this run is never kept, even when
- * it also sits in a shared-CDN range: blocking it would take that name down too.
- * The shared-CDN ranges catch the rest, since one address there serves thousands
- * of unrelated sites.
+ * An address that a protected name resolved to this run is never kept: blocking
+ * it would take that name down too. The shared-CDN ranges catch the rest, since
+ * one address there serves thousands of unrelated sites. An address that is both
+ * is dropped either way; protected is tested first, which only decides the reason
+ * reported for it.
  *
  * @param array<string> $addrs          IPv4 candidates (resolveAll's addresses)
  * @param array<string> $protectedAddrs what the protected names resolved to
@@ -239,7 +251,7 @@ function resolveAll(array $hosts, callable $lookup, int $budgetMs, callable $now
             continue;
         }
         foreach ($found as $ip) {
-            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            if (isIpv4($ip)) {
                 $addresses[] = $ip;
             }
         }
@@ -247,4 +259,154 @@ function resolveAll(array $hosts, callable $lookup, int $budgetMs, callable $now
     $addresses = array_unique($addresses);
     sort($addresses, SORT_STRING);
     return ['addresses' => $addresses, 'skipped' => $skipped, 'failed' => $failed];
+}
+
+/**
+ * The ids of the open connections to kill when a device starts being denied
+ * messaging: those going to one of $destinations, and those to a TCP port in
+ * $portLo..$portHi (a notification service holds one long-lived connection per
+ * device, to any address).
+ *
+ * Nothing else is selected, so the device's other connections, and every other
+ * device's connections to the same servers, are left alone. A range with
+ * $portLo > $portHi holds no port, which is how a caller asks for addresses only.
+ * A row missing any key this reads is ignored: a state that cannot be read in full
+ * is not killed on a guess.
+ *
+ * @param list<array<string, string>> $records      rows of core's `filter list
+ *        states` (its "details"); only id, proto, dst_addr and dst_port are read
+ * @param array<string>               $destinations IPv4 addresses or CIDRs
+ * @return list<string> the ids ("hexid/hexcreator"), unique, in input order
+ */
+function selectStatesToDrop(array $records, array $destinations, int $portLo, int $portHi): array
+{
+    $ids = [];
+    foreach ($records as $row) {
+        if (!isset($row['id'], $row['proto'], $row['dst_addr'], $row['dst_port'])) {
+            continue;
+        }
+        $port = (int)$row['dst_port'];
+        if (ipv4InAny($row['dst_addr'], $destinations)
+            || (strtolower($row['proto']) === 'tcp' && $port >= $portLo && $port <= $portHi)) {
+            $ids[] = $row['id'];
+        }
+    }
+    return array_values(array_unique($ids));
+}
+
+/**
+ * The wanted alias names that an alias of someone else's already holds.
+ *
+ * The plugin's aliases have fixed names, and a user may have made one first; the
+ * plugin must not take over what it did not make. An alias is the plugin's when its
+ * description starts with the marker for its name, the test the rest of the plugin
+ * uses (lib/markers.php): any other alias with a wanted name is a conflict, and an
+ * alias with any other name is not this function's business.
+ *
+ * @param list<array<string, string>> $aliases every alias in the firewall, as
+ *        ['name' => ..., 'description' => ...]
+ * @param array<string, string>       $wanted  name => description marker
+ * @return list<string> the conflicting names, in alias order
+ */
+function aliasConflicts(array $aliases, array $wanted): array
+{
+    $conflicts = [];
+    foreach ($aliases as $alias) {
+        $marker = $wanted[$alias['name']] ?? null;
+        if ($marker !== null && !str_starts_with($alias['description'], $marker)) {
+            $conflicts[] = $alias['name'];
+        }
+    }
+    return $conflicts;
+}
+
+/**
+ * Where, outside the plugin's own objects, the firewall's configuration mentions
+ * one of the plugin's aliases: the places uninstall must not leave dangling.
+ *
+ * Each element is judged on its own text and its own attribute values, not its
+ * children's, so a hit is reported once, at the element that holds it. A name counts
+ * as a whole word only: it must not touch a letter, digit, '_', '.' or '-', so
+ * 'NoMessagingOld' is not 'NoMessaging'. The plugin's own objects are skipped with
+ * everything inside them: an element whose uuid attribute is in $ownUuids, and the
+ * OPNsense/ParentalControl subtree that holds its settings. The root element itself
+ * is not examined.
+ *
+ * A location is the element's path below the root, joined with '/', then ' (uuid)'
+ * for the nearest ancestor-or-self that has a uuid attribute, as in
+ * 'OPNsense/Firewall/Filter/rules/rule/source_net (user-1)'. One per element, in
+ * document order.
+ *
+ * A configuration that cannot be parsed gives the single location 'config.xml could
+ * not be parsed', so the caller refuses instead of going on blind. Whatever the
+ * text, parsing neither throws nor warns, and libxml's error mode is left as it was
+ * found. Text the pattern cannot be run on counts as a hit, for the same reason.
+ *
+ * @param string        $configXml the whole of /conf/config.xml, root <opnsense>
+ * @param array<string> $ownUuids  uuids of the plugin's own aliases and rules
+ * @param array<string> $names     the plugin's alias names
+ * @return list<string> locations
+ */
+function findForeignReferences(string $configXml, array $ownUuids, array $names): array
+{
+    $doc = new DOMDocument();
+    $previous = libxml_use_internal_errors(true);
+    /* loadXML() throws, rather than failing, on an empty string */
+    $loaded = $configXml !== '' && $doc->loadXML($configXml, LIBXML_NONET);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
+    $root = $loaded ? $doc->documentElement : null;
+    if ($root === null) {
+        return ['config.xml could not be parsed'];
+    }
+    /* with no names the pattern below would match any run of non-word characters */
+    if ($names === []) {
+        return [];
+    }
+
+    $quoted = array_map(fn(string $n): string => preg_quote($n, '/'), $names);
+    $word = '/(?<![\w.-])(?:' . implode('|', $quoted) . ')(?![\w.-])/';
+    $found = [];
+    $walk = function (
+        DOMElement $el,
+        string $path,
+        string $uuid
+    ) use (&$walk, &$found, $word, $ownUuids): void {
+        $path .= ($path === '' ? '' : '/') . $el->nodeName;
+        $own = $el->getAttribute('uuid');
+        /* an empty uuid is no uuid: it must not match an empty entry in $ownUuids */
+        $isOwn = $own !== '' && in_array($own, $ownUuids, true);
+        if ($isOwn || $path === 'OPNsense/ParentalControl') {
+            return;
+        }
+        $uuid = $own !== '' ? $own : $uuid;
+
+        $strings = [];
+        foreach ($el->attributes as $attribute) {
+            $strings[] = $attribute->value;
+        }
+        $children = [];
+        foreach ($el->childNodes as $child) {
+            if ($child instanceof DOMText) {
+                $strings[] = $child->data;
+            } elseif ($child instanceof DOMElement) {
+                $children[] = $child;
+            }
+        }
+        /* preg_match() gives false when it fails, which is not the same as no match:
+           count it as a hit, so uninstall refuses rather than passing text it could
+           not check */
+        if (array_filter($strings, fn(string $s): bool => preg_match($word, $s) !== 0)) {
+            $found[] = $path . ($uuid !== '' ? " ($uuid)" : '');
+        }
+        foreach ($children as $child) {
+            $walk($child, $path, $uuid);
+        }
+    };
+    foreach ($root->childNodes as $child) {
+        if ($child instanceof DOMElement) {
+            $walk($child, '', '');
+        }
+    }
+    return $found;
 }
