@@ -47,7 +47,9 @@ fi
 # rm unlinks: this script keeps reading from its own open descriptor, so
 # removing the directory it lives in mid-run is safe - unlike overwriting it.
 rm -rf "$SCRIPTS"
-# the learned server list and the sync lock, once uninstall.php is done with it
+# The learned server list, the sync lock and uninstall.php's marker. Last, after
+# $SCRIPTS: a sync still waiting for the lock then finds either the marker or its
+# own file gone, and changes nothing.
 rm -rf "$DATA"
 
 service configd restart >/dev/null 2>&1 || true

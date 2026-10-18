@@ -17,6 +17,9 @@
  * owner. Everything is matched by description marker, so a renamed alias is
  * still found.
  *
+ * A run that removes everything leaves UNINSTALL_MARKER behind: until the next
+ * install, every sync then changes nothing.
+ *
  * Idempotent: safe to run when some or all of it is already gone.
  */
 
@@ -44,6 +47,20 @@ foreach (['markers.php', 'messaging.php'] as $lib) {
 if (!is_dir(DATA_DIR)) {
     @mkdir(DATA_DIR, 0700);         /* a sync starting at the same moment may make it first */
 }
+/* The marker goes down before the lock is taken, so a sync that gets the lock
+   next changes nothing. Any exit before everything is removed takes it away
+   again: a refusal changed nothing, and a run that failed part way must not stop
+   the syncs that would put the rest back. */
+if (!@touch(UNINSTALL_MARKER)) {
+    fwrite(STDERR, "not removing anything: cannot create " . UNINSTALL_MARKER . "\n");
+    exit(1);
+}
+$cleanUp = [UNINSTALL_MARKER];      /* removed at exit, unless the run gets to the end */
+register_shutdown_function(function () use (&$cleanUp): void {
+    foreach ($cleanUp as $file) {
+        @unlink($file);
+    }
+});
 $lock = @fopen(DATA_DIR . '/sync.lock', 'c');
 if ($lock === false) {
     fwrite(STDERR, "cannot open " . DATA_DIR . "/sync.lock\n");
@@ -154,5 +171,6 @@ if (!empty($ruleUuids) || !empty($aliasUuids)) {
 if (!empty($jobUuids)) {
     $backend->configdRun('cron restart');
 }
+$cleanUp = [];                  /* everything is removed: the marker stays */
 
 echo empty($removed) ? "nothing to remove\n" : implode("\n", $removed) . "\n";

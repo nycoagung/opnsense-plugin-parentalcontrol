@@ -129,6 +129,9 @@ for entry in $FILES; do
 done
 [ -n "$CLEAN" ] && rm -rf "$CLEAN"
 echo "files installed"
+# an uninstall's marker (UNINSTALL_MARKER in lib/markers.php) stops every sync
+# until the plugin is installed again, which is now
+rm -f /var/db/parentalcontrol/uninstalling
 
 # This script is reachable as 'configctl parentalcontrol install'; restarting
 # configd from a script configd launched would kill it mid-run, so only restart

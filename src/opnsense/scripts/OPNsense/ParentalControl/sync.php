@@ -87,6 +87,13 @@ if ($mode !== 'status') {
        before it saved, and from any change made in the GUI meanwhile, instead
        of saving an older copy over them. */
     Config::getInstance()->forceReload();
+    /* Uninstall has removed everything, or is about to: put nothing back. Its
+       marker stops a sync that waited for uninstall.php. uninstall.sh deletes this
+       script before the marker, so a sync that waited longer finds it gone. */
+    if (file_exists(UNINSTALL_MARKER) || !is_file(__FILE__)) {
+        fwrite(STDERR, "uninstall in progress - nothing changed\n");
+        exit(0);
+    }
 }
 
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
