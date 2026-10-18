@@ -706,6 +706,9 @@ function aliasConflicts(array $aliases, array $wanted): array
     return $conflicts;
 }
 
+/* findForeignReferences()'s one location when the configuration cannot be parsed */
+const CONFIG_UNPARSED = 'config.xml could not be parsed';
+
 /**
  * Where, outside the plugin's own objects, the firewall's configuration mentions
  * one of the plugin's aliases: the places uninstall must not leave dangling.
@@ -713,20 +716,21 @@ function aliasConflicts(array $aliases, array $wanted): array
  * Each element is judged on its own text and its own attribute values, not its
  * children's, so a hit is reported once, at the element that holds it. A name counts
  * as a whole word only: it must not touch a letter, digit, '_', '.' or '-', so
- * 'NoMessagingOld' is not 'NoMessaging'. The plugin's own objects are skipped with
- * everything inside them: an element whose uuid attribute is in $ownUuids, and the
- * OPNsense/ParentalControl subtree that holds its settings. The root element itself
- * is not examined.
+ * 'NoMessagingOld' is not 'NoMessaging'. An empty name is ignored. The plugin's own
+ * objects are skipped with everything inside them: an element whose uuid attribute is
+ * in $ownUuids, and the OPNsense/ParentalControl subtree that holds its settings. So
+ * is the top-level revision element: it records the last save, whose description may
+ * name an alias without referring to it. The root element itself is not examined.
  *
  * A location is the element's path below the root, joined with '/', then ' (uuid)'
  * for the nearest ancestor-or-self that has a uuid attribute, as in
  * 'OPNsense/Firewall/Filter/rules/rule/source_net (user-1)'. One per element, in
  * document order.
  *
- * A configuration that cannot be parsed gives the single location 'config.xml could
- * not be parsed', so the caller refuses instead of going on blind. Whatever the
- * text, parsing neither throws nor warns, and libxml's error mode is left as it was
- * found. Text the pattern cannot be run on counts as a hit, for the same reason.
+ * A configuration that cannot be parsed gives the single location CONFIG_UNPARSED,
+ * so the caller refuses instead of going on blind. Whatever the text, parsing neither
+ * throws nor warns, and libxml's error mode is left as it was found. Text the pattern
+ * cannot be run on counts as a hit, for the same reason.
  *
  * @param string        $configXml the whole of /conf/config.xml, root <opnsense>
  * @param array<string> $ownUuids  uuids of the plugin's own aliases and rules
@@ -743,9 +747,11 @@ function findForeignReferences(string $configXml, array $ownUuids, array $names)
     libxml_use_internal_errors($previous);
     $root = $loaded ? $doc->documentElement : null;
     if ($root === null) {
-        return ['config.xml could not be parsed'];
+        return [CONFIG_UNPARSED];
     }
-    /* with no names the pattern below would match any run of non-word characters */
+    /* with no names, or an empty one, the pattern below would match any run of
+       non-word characters */
+    $names = array_diff($names, ['']);
     if ($names === []) {
         return [];
     }
@@ -762,7 +768,7 @@ function findForeignReferences(string $configXml, array $ownUuids, array $names)
         $own = $el->getAttribute('uuid');
         /* an empty uuid is no uuid: it must not match an empty entry in $ownUuids */
         $isOwn = $own !== '' && in_array($own, $ownUuids, true);
-        if ($isOwn || $path === 'OPNsense/ParentalControl') {
+        if ($isOwn || $path === 'OPNsense/ParentalControl' || $path === 'revision') {
             return;
         }
         $uuid = $own !== '' ? $own : $uuid;

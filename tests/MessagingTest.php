@@ -814,7 +814,7 @@ check('references: part of a longer name is not a reference',
                 'NoMessagingOld', 'NoMessaging.example', 'NoMessaging-old', 'NoMessaging_Kids'])),
     []);
 /* five elements, five locations: every element is reported, none merged */
-check('references: set off by other characters is one',
+check('references: each element set off by other characters is reported',
     $refs($inX(['NoMessaging', 'a,NoMessaging,b', "a\nNoMessaging\nb", 'block NoMessaging now',
                 '(NoMessaging)'])),
     ['x', 'x', 'x', 'x', 'x']);
@@ -825,6 +825,14 @@ check('references: only the plugin\'s own subtree is skipped',
     $refs('<OPNsense><ParentalControl2><a>NoMessaging</a></ParentalControl2></OPNsense>'
         . '<x><OPNsense><ParentalControl><b>NoMessaging</b></ParentalControl></OPNsense></x>'),
     ['OPNsense/ParentalControl2/a', 'x/OPNsense/ParentalControl/b']);
+/* the top-level revision element records the last save, and a save's description may
+   name an alias; all of it is skipped, while a neighbour with a longer name, and a
+   revision element anywhere else, are examined */
+check('references: only the top-level revision is skipped',
+    $refs('<revision><username>NoMessaging</username>'
+        . '<description>NoMessaging</description></revision>'
+        . '<revision2><a>NoMessaging</a></revision2><x><revision>NoMessaging</revision></x>'),
+    ['revision2/a', 'x/revision']);
 
 /* Where the hit is reported: the path below the root, then the nearest uuid. */
 check('references: an element without a uuid is named by its path alone',
@@ -856,6 +864,12 @@ check('references: an empty own uuid hides nothing',
 check('references: no names, nothing to find',
     $refs("\n  <a>\n    <b>x</b>\n  </a>\n", []),
     []);
+/* an empty name would match next to any space, so it is no name: alone it finds
+   nothing, and beside a real one it does not add hits of its own */
+check('references: an empty name is ignored',
+    [$refs("\n  <a>\n    <b>x</b>\n  </a>\n", ['']),
+     $refs('<a> </a><b>NoMessaging</b>', ['', 'NoMessaging'])],
+    [[], ['b']]);
 /* A match that fails to run is not a miss: text the pattern could not judge counts as a
    hit, so uninstall refuses. The failure is forced with a backtrack limit of 1 and no
    JIT, on a name no other check compiles; 'PcreProbeX' is no reference to it. */
