@@ -8,6 +8,7 @@ the checks that run it point every download at a closed port to prove it.
 """
 
 import importlib.util
+import ipaddress
 import json
 import os
 import subprocess
@@ -89,6 +90,98 @@ check('wns: no client section stops the build',
 check('wns: a client section without a range stops the build',
       build(EMPTY),
       [1, False, 'ValueError: WNS: no IPv4 ranges'])
+
+
+def error(fn, *args):
+    """The message of the ValueError fn(*args) raises, or 'no error'."""
+    try:
+        fn(*args)
+    except ValueError as e:
+        return str(e)
+    return 'no error'
+
+
+RIPESTAT = json.dumps({'data': {'prefixes': [
+    {'prefix': '192.0.2.0/24'}, {'prefix': '2001:db8::/32'}, {'prefix': '198.51.100.0/25'}]}})
+RIPESTAT_V6 = json.dumps({'data': {'prefixes': [{'prefix': '2001:db8::/32'}]}})
+NET_A = {'@startAddress': '203.0.113.0', '@endAddress': '203.0.113.127', '@handle': 'NET-A', '@name': 'EXAMPLE'}
+NET_B = {'@startAddress': '198.51.100.0', '@endAddress': '198.51.100.255', '@handle': 'NET-B', '@name': 'EXAMPLE'}
+ARIN_ONE = json.dumps({'nets': {'netRef': NET_A}})
+ARIN_TWO = json.dumps({'nets': {'netRef': [NET_A, NET_B]}})
+
+check('ranges: RIPEstat prefixes keep IPv4 only',
+      gen.strs(gen.asn_prefixes('fixture', RIPESTAT)),
+      ['192.0.2.0/24', '198.51.100.0/25'])
+check('ranges: no IPv4 prefix stops the build',
+      error(gen.asn_prefixes, 'fixture', RIPESTAT_V6),
+      'fixture: no IPv4 ranges')
+check('ranges: ARIN accepts one net as an object',
+      gen.strs(gen.arin_nets('fixture', ARIN_ONE)),
+      ['203.0.113.0/25'])
+check('ranges: ARIN accepts a list of nets',
+      gen.strs(gen.arin_nets('fixture', ARIN_TWO)),
+      ['198.51.100.0/24', '203.0.113.0/25'])
+check('ranges: ARIN without a net stops the build',
+      error(gen.arin_nets, 'fixture', json.dumps({'nets': {}})),
+      'fixture: no networks')
+
+# app_ranges() fetches and merges an app's ranges; every download goes through the
+# get() it is given, which here answers from the fixtures and records each request
+requests = []
+
+
+def get(url, headers=None):
+    requests.append([url, headers or {}])
+    if url.startswith('https://stat.ripe.net/'):
+        return RIPESTAT.encode()
+    if url.startswith('https://whois.arin.net/'):
+        return ARIN_ONE.encode()
+    return b'192.0.2.0/25\n192.0.2.128/25\n'
+
+
+check('ranges: sources come from RIPEstat by AS and from ARIN by network name, merged',
+      [gen.strs(gen.app_ranges('example', {'ranges_sources': [{'ripestat_asn': 64496}, {'arin_name': 'EXAMPLE'}]},
+                               get)), requests],
+      [['192.0.2.0/24', '198.51.100.0/25', '203.0.113.0/25'],
+       [['https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS64496', {}],
+        ['https://whois.arin.net/rest/nets;name=EXAMPLE', {'Accept': 'application/json'}]]])
+check('ranges: a published list is still read from its URL, as published',
+      gen.strs(gen.app_ranges('example', {'ranges_url': 'https://lists.example/cidr.txt'}, get)),
+      ['192.0.2.0/25', '192.0.2.128/25'])
+check('ranges: an app with no ranges has none',
+      gen.app_ranges('example', {'hosts': ['a.example']}, get),
+      [])
+check('ranges: an app may not have both a URL and sources',
+      error(gen.app_ranges, 'example', {'ranges_url': 'https://lists.example/cidr.txt',
+                                        'ranges_sources': [{'ripestat_asn': 64496}]}, get),
+      'example: ranges_url and ranges_sources cannot both be set')
+check('ranges: an unknown source stops the build',
+      error(gen.app_ranges, 'example', {'ranges_sources': [{'bgp_feed': 'x'}]}, get),
+      'example: unknown range source {"bgp_feed": "x"}')
+
+net = ipaddress.ip_network
+check('ranges: a range wider than /8 stops the build',
+      error(gen.check_app_ranges, 'example', [net('0.0.0.0/7')], [], []),
+      'example: 0.0.0.0/7 is wider than /8')
+check('ranges: a range inside a shared CDN stops the build',
+      error(gen.check_app_ranges, 'example', [net('198.51.100.0/25')], [net('198.51.100.0/24')], []),
+      'example: 198.51.100.0/25 overlaps a shared CDN or notification range')
+check('ranges: a range overlapping a notification range stops the build',
+      error(gen.check_app_ranges, 'example', [net('203.0.113.0/24')], [], [net('203.0.113.128/25')]),
+      'example: 203.0.113.0/24 overlaps a shared CDN or notification range')
+check('ranges: a range that is not public stops the build',
+      error(gen.check_app_ranges, 'example', [net('192.0.2.0/24')], [], []),
+      'example: 192.0.2.0/24 is not a public range')
+
+check('owners: an owner that is not an app stops the build',
+      error(gen.check_owners, {'a.example': 'nobody'}, ['a.example'], ['whatsapp']),
+      'protected_owners: a.example: nobody is not an app')
+check('owners: an owned name must be protected',
+      error(gen.check_owners, {'b.example': 'whatsapp'}, ['a.example'], ['whatsapp']),
+      'protected_owners: b.example is not in protected_hosts')
+check('owners: a valid map passes',
+      error(gen.check_owners, {'a.example': 'whatsapp'}, ['a.example'], ['whatsapp']),
+      'no error')
 
 print(f'\n{passed} passed, {failed} failed')
 sys.exit(1 if failed else 0)

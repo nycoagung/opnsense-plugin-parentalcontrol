@@ -8,6 +8,12 @@ A maintainer's tool, never installed. The build reads the hand-maintained
 tools/messaging-sources.json and adds the lists it downloads:
 
 - each app's published ranges (Telegram's cidr.txt), IPv4 only;
+- the ranges of apps whose servers are handed out as bare addresses or sit in
+  their own registered networks, from each app's ranges_sources: an AS's
+  announced IPv4 prefixes from RIPEstat ({"ripestat_asn": N}) and networks by
+  name from ARIN's Whois-RWS ({"arin_name": "NAME"}), merged. Every app range
+  must be public, no wider than /8, and clear of the shared CDNs and the
+  notification ranges;
 - the addresses Windows PCs reach the Windows Notification Service on: the
   <ClientIPsIPv4> element of Microsoft Download Center item 44238, "Windows
   Notification Service (WNS) VIP and IP Ranges". The file's address changes
@@ -19,8 +25,13 @@ tools/messaging-sources.json and adds the lists it downloads:
   announced prefixes from RIPEstat), merged.
 
 A failed download, an entry that is not an address range, a WNS file without
-the element, or a list that comes out empty stops the build with exit status 1
-before anything is written.
+the element, a list that comes out empty, an app range that fails its checks,
+or a protected_owners entry whose name is not protected or whose owner is not
+an app stops the build with exit status 1 before anything is written.
+
+protected_owners maps a protected host name to the app that owns it: the name
+protects its addresses only while that app is not selected, since a selected
+app's own servers are what it blocks.
 
 Where the hand-maintained data comes from: Apple's ranges from Apple support
 article 102266, "If your Apple devices aren't getting Apple push notifications";
@@ -34,8 +45,10 @@ each of them between two AWS Global Accelerators.
 machine's resolver and prints each address with its network and owner
 (RIPEstat) and what the plugin's guard would do with it under the current
 messaging.json: kept, protected (a protected name resolves to it) or shared
-CDN. It then prints the owner of every shipped range. The output shows this
-network's DNS: read it, never commit it.
+CDN; for an app's own host names, a protected name it owns does not count.
+It also lists which protected names each app owns, then prints the owner of
+every shipped range. The output shows this network's DNS: read it, never
+commit it.
 """
 
 import argparse
@@ -54,9 +67,9 @@ DATA = ROOT / 'src/opnsense/scripts/OPNsense/ParentalControl/messaging.json'
 CIDR = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b')
 
 
-def fetch(url):
+def fetch(url, headers=None):
     # www.cloudflare.com answers urllib's default User-Agent with HTTP 403
-    request = urllib.request.Request(url, headers={'User-Agent': 'build-messaging-data'})
+    request = urllib.request.Request(url, headers={'User-Agent': 'build-messaging-data', **(headers or {})})
     with urllib.request.urlopen(request, timeout=60) as response:
         return response.read()
 
@@ -92,34 +105,93 @@ def wns_ranges(source, xml):
     return ipv4(source, CIDR.findall(client.group(1)))
 
 
+def asn_prefixes(source, text):
+    """The IPv4 prefixes in a RIPEstat announced-prefixes answer."""
+    return ipv4(source, [p['prefix'] for p in json.loads(text)['data']['prefixes']])
+
+
+def arin_nets(source, text):
+    """The IPv4 networks of an ARIN Whois-RWS nets;name= answer, which gives one
+    net as an object and several as a list."""
+    refs = json.loads(text)['nets'].get('netRef', [])
+    refs = [refs] if isinstance(refs, dict) else refs
+    if not refs:
+        raise ValueError(f'{source}: no networks')
+    return ipv4(source, [str(n) for r in refs for n in ipaddress.summarize_address_range(
+        ipaddress.ip_address(r['@startAddress']), ipaddress.ip_address(r['@endAddress']))])
+
+
+def app_ranges(app_id, app, get=fetch):
+    """An app's shipped ranges: its published list (ranges_url), the merge of its
+    ranges_sources, or none."""
+    url, sources = app.get('ranges_url'), app.get('ranges_sources')
+    if url and sources:
+        raise ValueError(f'{app_id}: ranges_url and ranges_sources cannot both be set')
+    if url:
+        return ipv4(url, get(url).decode().split())
+    nets = []
+    for source in sources or []:
+        if 'ripestat_asn' in source:
+            where = f'https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS{source["ripestat_asn"]}'
+            nets += asn_prefixes(where, get(where).decode())
+        elif 'arin_name' in source:
+            where = f'https://whois.arin.net/rest/nets;name={source["arin_name"]}'
+            nets += arin_nets(where, get(where, {'Accept': 'application/json'}).decode())
+        else:
+            raise ValueError(f'{app_id}: unknown range source {json.dumps(source)}')
+    return sorted(ipaddress.collapse_addresses(nets))
+
+
+def check_app_ranges(app_id, nets, cdn, notify):
+    """sync.php blocks an app's ranges as they are, so each must be no wider than
+    /8, clear of the shared CDNs and the notification ranges, and public."""
+    for n in nets:
+        if n.prefixlen < 8:
+            raise ValueError(f'{app_id}: {n} is wider than /8')
+        if any(n.overlaps(c) for c in [*cdn, *notify]):
+            raise ValueError(f'{app_id}: {n} overlaps a shared CDN or notification range')
+        if not n.is_global:
+            raise ValueError(f'{app_id}: {n} is not a public range')
+
+
+def check_owners(owners, protected, app_ids):
+    """Every owned name is a protected name, and every owner an app."""
+    for host, owner_app in owners.items():
+        if host not in protected:
+            raise ValueError(f'protected_owners: {host} is not in protected_hosts')
+        if owner_app not in app_ids:
+            raise ValueError(f'protected_owners: {host}: {owner_app} is not an app')
+
+
 def build(wns_file):
     src = json.loads(SOURCES.read_text())
     notes = src['notifications']
     cdn = src['shared_cdn_sources']
+    owners = src.get('protected_owners', {})
     # Microsoft's file first, so a bad one stops the build before any download
     wns_source = wns_file or notes['microsoft_ranges_url']
     microsoft = wns_ranges(wns_source, (Path(wns_file).read_bytes() if wns_file else fetch(wns_source)).decode())
-    apps = {
-        app_id: {
-            'label': app['label'],
-            'hosts': app['hosts'],
-            'ranges_url': app['ranges_url'],
-            'ranges': strs(ipv4(app['ranges_url'], fetch(app['ranges_url']).decode().split()))
-            if app['ranges_url'] else [],
-        }
-        for app_id, app in src['apps'].items()
-    }
+    check_owners(owners, src['protected_hosts'], list(src['apps']))
     cloudfront = json.loads(fetch(cdn['cloudfront']))['prefixes']
     cdn_lists = [
         ipv4(cdn['cloudflare'], fetch(cdn['cloudflare']).decode().split()),
         ipv4(cdn['fastly'], json.loads(fetch(cdn['fastly']))['addresses']),
         ipv4(cdn['cloudfront'], [p['ip_prefix'] for p in cloudfront if p['service'] == 'CLOUDFRONT']),
-    ] + [ipv4(url, [p['prefix'] for p in json.loads(fetch(url))['data']['prefixes']]) for url in cdn['akamai']]
+    ] + [asn_prefixes(url, fetch(url).decode()) for url in cdn['akamai']]
+    shared = sorted(ipaddress.collapse_addresses(n for nets in cdn_lists for n in nets))
+    notify = [ipaddress.ip_network(c) for c in notes['apple_ranges']] + microsoft
+    apps = {}
+    for app_id, app in src['apps'].items():
+        ranges = app_ranges(app_id, app)
+        check_app_ranges(app_id, ranges, shared, notify)
+        apps[app_id] = {'label': app['label'], 'hosts': app['hosts'],
+                        'ranges_url': app.get('ranges_url'), 'ranges': strs(ranges)}
     return {
         'schema': 1,
         'generated': datetime.date.today().isoformat(),
         'apps': apps,
         'protected_hosts': src['protected_hosts'],
+        'protected_owners': owners,
         'notifications': {
             'apple_ranges': notes['apple_ranges'],
             'google_hosts': notes['google_hosts'],
@@ -127,7 +199,7 @@ def build(wns_file):
             'microsoft_hosts': notes['microsoft_hosts'],
             'microsoft_ranges': strs(microsoft),
         },
-        'shared_cdn_ranges': strs(sorted(ipaddress.collapse_addresses(n for nets in cdn_lists for n in nets))),
+        'shared_cdn_ranges': strs(shared),
     }
 
 
@@ -157,13 +229,19 @@ def check():
     groups += [('google', notes['google_hosts']), ('microsoft', notes['microsoft_hosts']),
                ('protected', data['protected_hosts'])]
     answers = {host: resolve(host) for _, hosts in groups for host in hosts}
-    # the guard of lib/messaging.php filterCandidates(): protected first, then shared CDN
-    protected = {ip for host in data['protected_hosts'] for ip in answers[host]}
+    owners = data.get('protected_owners', {})
+    for host, owner_app in sorted(owners.items()):
+        print(f'{host}: protected unless {owner_app} is selected')
+    # the guard of lib/messaging.php: protected first, then shared CDN; a protected
+    # name its owner app counts against does not protect that app's own names
+    def protected(group):
+        return {ip for host in data['protected_hosts'] if owners.get(host) != group for ip in answers[host]}
     cdn = [ipaddress.ip_network(c) for c in data['shared_cdn_ranges']]
     listed = {f'{app_id} ranges': app['ranges'] for app_id, app in data['apps'].items()}
     listed.update(apple_ranges=notes['apple_ranges'], microsoft_ranges=notes['microsoft_ranges'])
     listed = {name: [ipaddress.ip_network(c) for c in cidrs] for name, cidrs in listed.items()}
     for group, hosts in groups:
+        guarded = protected(group)
         for host in hosts:
             print(f'{group} {host}')
             if not answers[host]:
@@ -173,7 +251,7 @@ def check():
                 if not addr.is_global:
                     print(f'    {ip:15}  not a public address, the resolver may have blocked it: unknown')
                     continue
-                verdict = 'protected' if ip in protected else 'shared CDN' if any(addr in n for n in cdn) else 'kept'
+                verdict = 'protected' if ip in guarded else 'shared CDN' if any(addr in n for n in cdn) else 'kept'
                 inside = [name for name, nets in listed.items() if any(addr in n for n in nets)]
                 print(f'    {ip:15}  {verdict:10}  {owner(ip)}' + (f'  (in {", ".join(inside)})' if inside else ''))
     # the shipped ranges are blocked without a lookup, so their owners are checked here
