@@ -28,7 +28,7 @@ than by name, so your existing rules are never touched and nothing is duplicated
 **Renaming the alias is safe.** Because the marker is name-independent, changing
 `Alias name` renames the existing aliases in place and repoints the rule at them,
 rather than creating a second pair and leaving the first enforcing invisibly. The
-old pf table is flushed on the way through, so a device that happened to be
+old pf table is removed on the way through, so a device that happened to be
 blocked at the moment of the rename does not stay blocked by a table nothing
 maintains any more. Renaming an alias by hand in Firewall → Aliases is picked up
 the same way on the next sync. An empty alias means the rule matches
@@ -50,14 +50,15 @@ so a firewall that never does gains nothing, and they are found by description
 marker like the rest.
 
 Unlike the internet alias, their names are fixed, and a rename by hand in Firewall →
-Aliases is not followed as it is for that one: the plugin goes on filling the table
-of the fixed name, which no rule uses any more, so the rules that use the renamed
-alias block nothing until it is renamed back. The Status tab reports it, saying
-"messaging alias renamed" with the name the alias has and the name it should have.
-If an alias with one of those names already exists and the plugin did not make it,
-the plugin does not take it over: messaging blocking stays off, the Status tab says
-why, and the internet switch keeps working. For the same reason the internet alias
-itself cannot be named `NoMessaging` or `Messaging_Servers`.
+Aliases is not followed as it is for that one: the plugin fills only the table of
+the fixed name, and only while its own alias has that name. After a rename it adds
+to neither table and only takes entries out of the old one, so the rules that use
+the renamed alias block nothing until it is renamed back. The Status tab reports
+it, saying "messaging alias renamed" with the name the alias has and the name it
+should have. If an alias with one of those names already exists and the plugin did
+not make it, the plugin does not take it over: messaging blocking stays off, the
+Status tab says why, and the internet switch keeps working. For the same reason the
+internet alias itself cannot be named `NoMessaging` or `Messaging_Servers`.
 
 ## Blocking messaging
 
@@ -170,7 +171,10 @@ filter, depending on nothing outside OPNsense core:
   cannot be resolved and nothing recent is remembered for it, learning pauses: the
   plugin cannot tell whether an address it finds is shared with that name, so it
   learns nothing new until the name resolves again, and Status says "learning
-  paused: no answer for …".
+  paused: no answer for …". The guard also looks inside ranges: a published range
+  that holds a protected name's address is left out ("range … holds protected
+  address …; not blocked"), while a notification range that holds one stays
+  blocked, because the notification cut wins, and Status names it too.
 
 A change takes effect on Apply or within the one-minute cycle.
 
@@ -180,12 +184,12 @@ The Status tab gains a **Messaging** column per device (blocked or allowed, with
 the reason) and a summary line: "Messaging: not in use" while no enabled device
 uses messaging; "Messaging: N server entries · not refreshed yet" until the first
 refresh has run (Apply runs a sync, which refreshes at once); then "· refreshed
-HH:MM". Behind it come any lookup or download errors and, in red, why messaging
-cannot be enforced at all: a reserved name taken by someone else's alias, a missing
-object, a messaging alias renamed by hand, or an unreadable data file.
-`configctl parentalcontrol status` carries the same under a `messaging` key, and
-per device `messaging`, `messaging_blocked` and `messaging_reason`. The existing
-keys are unchanged, which is what the dashboard widget reads.
+HH:MM". Behind it come any lookup, download or protected-range errors and, in red,
+why messaging cannot be enforced at all: a reserved name taken by someone else's
+alias, a missing object, a messaging alias renamed by hand, or an unreadable data
+file. `configctl parentalcontrol status` carries the same under a `messaging` key,
+and per device `messaging`, `messaging_blocked` and `messaging_reason`. The
+existing keys are unchanged, which is what the dashboard widget reads.
 
 ## Addressing a device
 
@@ -311,8 +315,8 @@ every sync then stops with
 
 so schedules are not re-evaluated, and devices stay as they were, until the
 install runs **a second time**. That line is not shown in the GUI:
-`configctl parentalcontrol sync` and the Apply button report only "Error (1)", and
-the Status tab stays blank. Running
+`configctl parentalcontrol sync` reports only "Error (1)", the Apply button only
+"failed", and the Status tab stays blank. Running
 `/usr/local/opnsense/scripts/OPNsense/ParentalControl/sync.php` directly prints it.
 The first run also copies the new installer, which does the rest. Run
 `configctl parentalcontrol install` twice in a row, or use the codeload bootstrap
@@ -395,10 +399,11 @@ The config-side cleanup is also available on its own as
 `configctl parentalcontrol uninstall` — useful to disable enforcement while
 leaving the plugin installed. It removes the same firewall objects and the cron job
 but not the files, the data directory or the marker. With the cron job gone nothing
-syncs by itself, and the Status tab shows the schedule cron as not installed. The
-objects and the cron job come back with the next sync somebody starts: Apply,
-`configctl parentalcontrol sync`, or a flip of the dashboard widget's switch. Two
-things to know about it:
+syncs by itself, and while the plugin is enabled the Status tab shows the schedule
+cron as not installed. The next sync somebody starts (Apply,
+`configctl parentalcontrol sync`, or a flip of the dashboard widget's switch) puts
+the internet objects back, the cron job too while the plugin is enabled, and the
+messaging objects once a device uses messaging. Two things to know about it:
 
 - When it refuses, configctl shows only "Execute error". Run `uninstall.sh` (or
   `uninstall.php`) directly to read why.
@@ -411,8 +416,8 @@ partway through that.
 
 If a library file they need is missing, `sync.php` and `uninstall.php` print one
 line naming it and exit 1 instead of failing inside PHP. That line reaches you only
-when you run them directly: `configctl parentalcontrol sync` and the Apply button
-report only "Error (1)", the Status tab stays blank, and
+when you run them directly: `configctl parentalcontrol sync` reports only
+"Error (1)", the Apply button only "failed", the Status tab stays blank, and
 `configctl parentalcontrol uninstall` reports only "Execute error".
 
 ## Known limits
@@ -433,11 +438,19 @@ Blocking messaging is by server address, which sets its limits:
   iMessage and no incoming FaceTime calls. Ordinary phone calls and SMS over the
   mobile network still work. Notifications held back during the block may all
   arrive when it lifts.
+- The notification cut covers the platforms' push services: Apple's, Google's and
+  Microsoft's. An app that keeps its own push connection, such as a browser's web
+  push or some desktop clients, is not covered.
 - Phones that use a manufacturer's own notification service instead of Google's, as
   some phones sold in China do, are not covered.
 - Apple's ranges and Microsoft's list are only as current as the installed plugin
   version.
 - The list of apps is one for every device: there is no per-device choice.
+- While a device uses messaging and the firewall's own resolver is failing, each
+  per-minute sync spends up to about 30 to 40 seconds on lookups while it holds its
+  lock. An Apply or a widget change made then waits, and can fail with "another
+  sync is still running" (Apply shows only "failed"); the next per-minute sync
+  applies it. Scheduled changes still go first in each run.
 
 ## What has been verified, and what has not
 
@@ -457,13 +470,13 @@ extensions) and Python 3:
     php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; python3 -I tests/BuildMessagingDataTest.py
 
 Each prints a line per check and exits 1 when one fails. All pass, re-run on
-2026-10-18:
+2026-10-19:
 
 | File | Checks | What it covers |
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
-| `tests/MessagingTest.php` | 151 | the messaging decision, the IPv4 helpers, the builders of the server list and its cache, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/MessagingDataTest.php` | 18 | `messaging.json`: no protected name or private range in it, the notification ranges and names pinned, and its agreement with the settings model |
+| `tests/MessagingTest.php` | 155 | the messaging decision, the IPv4 helpers, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/MessagingDataTest.php` | 22 | `messaging.json`: no protected name, private range or shared-CDN range in it, a host name for every app, the notification ranges and names and the Facebook and Instagram protected names pinned, and its agreement with the settings model |
 | `tests/BuildMessagingDataTest.py` | 3 | which part of Microsoft's list the data generator turns into ranges |
 
 **Mutation testing.** While the code was written, its checks were run against
@@ -473,16 +486,19 @@ the pre-fix logic, which they fail on 4 cases. The counts reported for the rest:
 24, 50, 65, 128 and 8 broken copies of the library, at the five stages
 `MessagingTest.php` was built in; 31 of the data file and 23 of the model for
 `MessagingDataTest.php`, whose alias-name check was also shown failing against the
-old pattern; and 5 of the generator for `BuildMessagingDataTest.py`. In the first
-three library stages each of the 89 checks was shown failing under at least one
-broken copy. Every broken copy was caught except seven in `MessagingTest.php`: five
-behave the same as the original on every input that can occur, and two fold the case
-of alias names, which the tests leave open on purpose.
+old pattern; and 5 of the generator for `BuildMessagingDataTest.py`. The last round
+of fixes added 11 broken copies of the library and 8 of the data file, the model
+and the rule's ports, every one caught. In the first three library stages each of
+the 89 checks was shown failing under at least one broken copy. Every broken copy
+was caught except seven in `MessagingTest.php`: five behave the same as the
+original on every input that can occur, and two fold the case of alias names,
+which the tests leave open on purpose.
 
-**Static analysis (0.1.0)**, on 2026-10-18. PHPStan 2.3.1 at its strictest level
-(9), over the plugin's scripts, library files, `controllers/` and model, with
-OPNsense core 26.7.7's sources and the plugin's own library files and model on its
-scan path, reports 79 findings, none of them a defect:
+**Static analysis (0.1.0)**, on 2026-10-18, with PHPStan run again on 2026-10-19.
+PHPStan 2.3.1 at its strictest level (9), over the plugin's scripts, library files,
+`controllers/` and model, with OPNsense core 26.7.7's sources and the plugin's own
+library files and model on its scan path, reports 84 findings, none of them a
+defect:
 
 - 66 are what it cannot follow in the framework: model fields reached through
   `__get` and iterators typed as `mixed` (35), `Config::getInstance()` typed as
@@ -490,7 +506,7 @@ scan path, reports 79 findings, none of them a defect:
   do not exist (10), core's `getModel()` documented as possibly null though it
   never is (2), `config.inc` on PHP's include path (4), and the API actions' JSON
   arrays having no declared value types (9).
-- 13 are new in this release, all in `lib/serverlist.php`: the messaging data file
+- 18 are new in this release, all in `lib/serverlist.php`: the messaging data file
   and the state listing that configd returns are decoded from JSON, which PHPStan
   types as `mixed`, so it cannot check the calls that take their parts. The data
   file's shape is pinned by `tests/MessagingDataTest.php`, a state row missing a
@@ -510,7 +526,8 @@ skips), reports three findings:
 - `dynamic-urllib-use-detected` in `tools/build-messaging-data.py`. Every URL the
   generator opens has a fixed scheme and host: they come from the committed
   `tools/messaging-sources.json`, all of them `https`, or from the
-  `https://stat.ripe.net/` template, whose only variable is the `resource`, an
+  `https://stat.ripe.net/` template, whose two variables are the `call`, one of the
+  two the code names (`network-info` and `as-overview`), and the `resource`, an
   address or an AS number. It is a maintainer's tool and is never installed.
 
 Semgrep's bash parser also cannot read `install.sh` in full (`sh -n` and `dash -n`

@@ -425,6 +425,14 @@ above is left as it was written.
   still expire while learning is paused. Learned addresses also go through the guard
   again on every run, so one that a protected name starts to resolve to, or that a
   plugin update's shared-CDN list covers, leaves the set.
+- **The guard also looks inside ranges.** Once a run knows its protected addresses,
+  remembered answers included, every range is checked for them. An app's published
+  range (downloaded, the last good copy or the shipped one) that holds a protected
+  address is left out of the servers table, and status says "range <range> of
+  <app> holds protected address <ip>; not blocked". A notification range (Apple's
+  or Microsoft's) that holds one stays in the table, because the notification cut
+  wins, and status says "notification range <range> holds protected address <ip>".
+  Each range is reported once, with the first protected address it holds.
 - **Lookups are limited in time.** Each name gets one try of one second. The
   notification services' and the apps' names share 20 seconds, the notification
   names first, and the protected names have 10. Names not reached are skipped and
@@ -476,7 +484,7 @@ above is left as it was written.
 - **Model version.** The model is version 1.1.0 with no migration. Devices saved by
   0.0.2 load with Messaging at Not blocked, and the app list at its default.
 - **Static analysis found more than the known framework findings.** Verification
-  step 2 expects none. PHPStan reports 13 findings of a new kind, where JSON read from
+  step 2 expects none. PHPStan reports 18 findings of a new kind, where JSON read from
   the data file or from configd is `mixed`, and Semgrep reports two false positives
   (the marker's `unlink()` and the generator's `urllib`). None is a defect; the
   README's "What has been verified" lists them.

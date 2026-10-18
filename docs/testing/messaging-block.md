@@ -27,6 +27,11 @@ If the plugin is already installed, its own installer can fetch the branch inste
 
     env GH_REF=messaging-block sh /usr/local/opnsense/scripts/OPNsense/ParentalControl/install.sh
 
+On a firewall that still runs 0.0.2, run that line twice. The first run is 0.0.2's
+installer, which copies only 0.0.2's files: every sync then fails until the second
+run, made by the new installer, completes the install. The bootstrap line above
+needs only one run.
+
 `configctl parentalcontrol install` cannot do this: it always fetches `main`.
 
 - [ ] The installer ends with `done - reload the GUI, then see Firewall > Parental Control`.
@@ -48,7 +53,9 @@ If the plugin is already installed, its own installer can fetch the branch inste
 
 ## 3 Block the test device
 
-1. On the test device, open a chat in each of the five apps and leave it open.
+1. On the test device, open a chat in each of the five apps and leave it open. In
+   one of them, say WhatsApp, start a voice call with the second device and keep it
+   going through Apply.
 2. Under Settings, keep all five apps selected and press Save.
 3. Under Devices, edit the device at `<device-ip>`. Set Mode to Always allowed, so
    that its internet schedule cannot cut everything and make a check pass or fail
@@ -60,6 +67,9 @@ If the plugin is already installed, its own installer can fetch the branch inste
       refreshed HH:MM": Apply runs a sync, which refreshes the list. "not refreshed
       yet" appears only on the first use, between saving the device and pressing
       Apply, or for up to a minute when the device was changed some other way.
+- [ ] On the first use, between saving the device and pressing Apply, the summary
+      also shows, in red, "messaging objects missing: " and the four objects. That
+      is expected: the sync that Apply runs creates them, and the red text goes.
 - [ ] `pfctl -t NoMessaging -T show` lists `<device-ip>`.
 
 ## 4 Each app, while blocked
@@ -75,6 +85,9 @@ the default.
 | Signal   |               |                 |                            |                    |
 | Snapchat |               |                 |                            |                    |
 | LINE     |               |                 |                            |                    |
+
+- [ ] The call started in section 3: note whether its audio stopped at once when
+      Apply cut messaging, or only after a few seconds (how many).
 
 ## 5 Notifications on the blocked device
 
@@ -95,6 +108,7 @@ the default.
 - [ ] Microsoft Teams: a chat and a call
 - [ ] Facebook
 - [ ] Instagram, including its direct messages
+- [ ] Instagram's images and videos still load while WhatsApp is blocked
 
 ## 7 Other devices
 
@@ -157,7 +171,8 @@ is back up:
       - "refreshed HH:MM" once a sync has run while messaging is in use, which
         Apply does at once;
       - "not refreshed yet" only on the first use, before Apply or the next
-        minute's sync.
+        minute's sync, together with a red "messaging objects missing: …",
+        which is expected until that sync creates them.
 
 ## 13 Config-side uninstall rehearsal
 
