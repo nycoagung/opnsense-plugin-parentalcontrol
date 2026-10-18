@@ -1,0 +1,179 @@
+# Messaging block: device checklist
+
+This is the hands-on part of the messaging block's verification: steps 4 and 5 of
+"Verification" in the design spec. The VM script, `tests/vm/uninstall-test.sh`,
+already covers installing, the firewall objects, dropped connections, the schedule
+and uninstalling. This list covers what only a real device can show.
+
+Work through it on the firewall with the test device in hand, and tick each line or
+note what happened instead. Placeholders:
+
+- `<device-ip>`: the test device's address, ideally one iPhone or iPad and one
+  Android phone in turn
+- `<other-device-ip>`: a second device that stays unblocked; an Apple device, so
+  that it can send iMessage and FaceTime
+- `<window-end>` and `<window-start>`: times a few minutes from now, as HH:MM
+
+Commands are run on the firewall's console (menu option 8) or over SSH. Each one
+works in the default root shell (csh) as well as in sh.
+
+## 1 Install the branch build
+
+Bootstrap from codeload with the branch as the ref (`GH_REF=messaging-block`):
+
+    fetch -qo /tmp/pc.tgz https://codeload.github.com/nycoagung/opnsense-plugin-parentalcontrol/tar.gz/refs/heads/messaging-block && rm -rf /tmp/pcx && mkdir -p /tmp/pcx && tar -xzf /tmp/pc.tgz -C /tmp/pcx && sh /tmp/pcx/opnsense-plugin-parentalcontrol-messaging-block/install.sh
+
+If the plugin is already installed, its own installer can fetch the branch instead:
+
+    env GH_REF=messaging-block sh /usr/local/opnsense/scripts/OPNsense/ParentalControl/install.sh
+
+`configctl parentalcontrol install` cannot do this: it always fetches `main`.
+
+- [ ] The installer ends with `done - reload the GUI, then see Firewall > Parental Control`.
+- [ ] After reloading the GUI, Firewall > Parental Control opens without an error.
+
+## 2 The page
+
+- [ ] Devices tab: the grid has a **Messaging** column.
+- [ ] The device dialog shows **Messaging** directly below **Mode**, with three
+      choices: Not blocked, Blocked, Blocked outside allowed hours.
+- [ ] Its help text says that blocking also stops every notification on the device,
+      including iMessage and incoming FaceTime calls.
+- [ ] Settings tab: **Messaging apps to block** is a token field holding LINE,
+      Signal, Snapchat, Telegram and WhatsApp.
+- [ ] Status tab: a **Messaging** column for each device, with a badge and the
+      reason.
+- [ ] With no enabled device using messaging, the summary line says
+      "Messaging: not in use".
+
+## 3 Block the test device
+
+1. On the test device, open a chat in each of the five apps and leave it open.
+2. Under Settings, keep all five apps selected and press Save.
+3. Under Devices, edit the device at `<device-ip>`, set Messaging to Blocked, save,
+   then press Apply.
+
+- [ ] Status: the device's Messaging badge says blocked, with the reason
+      "messaging always blocked".
+- [ ] The summary line says "Messaging: N server entries · not refreshed yet" at
+      first, then "Messaging: N server entries · refreshed HH:MM" within a minute.
+- [ ] `pfctl -t NoMessaging -T show` lists `<device-ip>`.
+
+## 4 Each app, while blocked
+
+Everything here should fail within a minute of pressing Apply. The chats opened in
+section 3 should stop updating; that needs "Drop existing connections" on, which is
+the default.
+
+| App      | Sending fails | Receiving fails | Voice and video calls fail | An open chat drops |
+|----------|---------------|-----------------|----------------------------|--------------------|
+| WhatsApp |               |                 |                            |                    |
+| Telegram |               |                 |                            |                    |
+| Signal   |               |                 |                            |                    |
+| Snapchat |               |                 |                            |                    |
+| LINE     |               |                 |                            |                    |
+
+## 5 Notifications on the blocked device
+
+- [ ] No notification of any kind arrives. Send test messages from the second device
+      in several apps, including apps that are not on the list.
+- [ ] An iMessage from the second Apple device is not delivered.
+- [ ] A FaceTime call from the second Apple device does not ring.
+- [ ] On Android, no push notification arrives.
+- [ ] Ordinary phone calls and SMS over the mobile network still work, if the device
+      has a SIM. They do not go through the firewall.
+
+## 6 Still working on the blocked device
+
+- [ ] Web browsing
+- [ ] YouTube
+- [ ] iCloud, such as Photos syncing
+- [ ] The app store (App Store or Google Play): browse and download an app
+- [ ] Microsoft Teams: a chat and a call
+- [ ] Facebook
+- [ ] Instagram, including its direct messages
+
+## 7 Other devices
+
+- [ ] The second device at `<other-device-ip>`, which is not blocked, keeps
+      receiving notifications throughout sections 4 to 6, from the same apps.
+- [ ] Its apps keep working.
+
+## 8 Back to Not blocked
+
+Set the test device's Messaging to Not blocked and press Apply.
+
+- [ ] Within a minute every app sends, receives and calls again.
+- [ ] Notifications resume. Some held back during the block may arrive at once.
+- [ ] `pfctl -t NoMessaging -T show` no longer lists `<device-ip>`.
+- [ ] Status: the badge says allowed, with the reason "messaging allowed".
+
+## 9 Follow schedule
+
+Set Messaging to "Blocked outside allowed hours". Make sure Days includes today, set
+Internet allowed from to now and until to `<window-end>`, and press Apply.
+
+- [ ] Before `<window-end>` the apps work.
+- [ ] Within a minute after `<window-end>` the apps are blocked and notifications
+      stop.
+- [ ] Set Override to Force allow and press Apply. Messaging stays blocked: Override
+      steers only the whole-internet switch. Set Override back to No override.
+- [ ] Set Internet allowed from to `<window-start>` and until to a time after it,
+      then press Apply. Within a minute after `<window-start>` the apps work again.
+
+## 10 Choosing apps
+
+With the test device set to Blocked:
+
+- [ ] Deselect one app under Settings, for example Telegram, press Save, then
+      Apply. Within about a minute that app works again, and the others stay
+      blocked.
+- [ ] Deselect every app, press Save, then reload the page. The field stays empty;
+      it is not refilled with the default apps.
+- [ ] With no app selected, the apps work on the blocked device, but its
+      notifications are still cut.
+- [ ] Select all five apps again, press Save, then Apply.
+
+## 11 Reboot
+
+With the test device set to Blocked, reboot the firewall. Within a minute after it
+is back up:
+
+- [ ] `pfctl -t NoMessaging -T show` lists `<device-ip>`.
+- [ ] `pfctl -t Messaging_Servers -T show | wc -l` is not zero.
+- [ ] The apps are blocked again on the device.
+
+## 12 Status page throughout
+
+- [ ] At every step above, the Status tab agrees with what the device shows: the
+      Messaging badge and reason for each device.
+- [ ] The summary line matches the situation: "not in use" when no enabled device
+      uses messaging, "not refreshed yet" in the first minute of use, and
+      "refreshed HH:MM" after that, followed by any lookup or download errors.
+
+## 13 Config-side uninstall rehearsal
+
+This is spec step 5. Take the inventory of the plugin's objects, remove them from
+the configuration, let a sync put them back, and take the inventory again. Wait a
+minute before the second inventory: core refreshes the plugin's local-networks
+alias in the background after the sync reloads the rules.
+
+    pfctl -s Tables > /tmp/inventory-before.txt
+    grep -c 'Parental Control:' /conf/config.xml >> /tmp/inventory-before.txt
+    configctl parentalcontrol uninstall && configctl parentalcontrol sync
+    sleep 60
+    pfctl -s Tables > /tmp/inventory-after.txt
+    grep -c 'Parental Control:' /conf/config.xml >> /tmp/inventory-after.txt
+    diff /tmp/inventory-before.txt /tmp/inventory-after.txt && echo same
+
+- [ ] `configctl parentalcontrol uninstall` lists what it removed, and the sync
+      answers `OK`.
+- [ ] The last command prints `same`.
+- [ ] The test device is blocked again: `pfctl -t NoMessaging -T show` lists
+      `<device-ip>`.
+
+## Recording the results
+
+Note the date, the firmware version and the devices' models and OS versions with
+the results. Leave out device names, addresses and anything else about the network
+from anything that is committed or shared.
