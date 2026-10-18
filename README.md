@@ -570,3 +570,6 @@ the changelog in `pkg-descr`, update the test counts and the static-analysis
 paragraph above, and tag. The `<version>` in `ParentalControl.xml` is the schema
 version of the saved settings, not the release; it changes only when the model
 does.
+
+**Change the configd action file only in a release that needs it**, because the
+previous release's installer restarts configd when that file changes.
