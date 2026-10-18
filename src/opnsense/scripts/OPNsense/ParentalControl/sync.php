@@ -26,7 +26,6 @@
 require_once("config.inc");
 require_once("util.inc");
 
-use OPNsense\Base\BaseModel;
 use OPNsense\Base\FieldTypes\BaseField;
 use OPNsense\Base\FieldTypes\NetworkAliasField;
 use OPNsense\Core\Backend;
@@ -42,6 +41,8 @@ const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
 require_once(__DIR__ . '/lib/markers.php');
 require_once(__DIR__ . '/lib/messaging.php');
+require_once(__DIR__ . '/lib/firewall.php');
+require_once(__DIR__ . '/lib/serverlist.php');
 
 /* the messaging aliases' fixed names, each with the marker that makes it ours */
 const MSG_ALIASES = [MSG_DEVICES_ALIAS => MARK_MSG_DEVICES, MSG_SERVERS_ALIAS => MARK_MSG_SERVERS];
@@ -224,25 +225,6 @@ function macToAddresses(string $mac): array
         }
     }
     return isset($leases[$mac]) ? array_values(array_unique($leases[$mac])) : [];
-}
-
-/**
- * Validate and save a model. On failure print every message, prefixed with
- * $what - a bare "validation failed" makes a first install impossible to
- * diagnose without a shell - and save nothing.
- */
-function saveModel(BaseModel $mdl, string $what): bool
-{
-    $val = $mdl->performValidation();
-    if ($val->count() > 0) {
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "$what: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
-        return false;
-    }
-    $mdl->serializeToConfig();
-    Config::getInstance()->save();
-    return true;
 }
 
 /**
@@ -448,109 +430,6 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
 /* ---- status: report only ------------------------------------------------- */
 
 /**
- * Current contents of the pf table.
- *
- * 'filter list table' answers {"items": [...]} - the payload is under 'items',
- * not at the top level, which is how core's own alias utility reads it. Getting
- * that wrong returns an empty list silently, which makes every address look
- * absent: nothing is ever removed from the table, so a device stays blocked
- * after its schedule reopens.
- *
- * @return list<string>
- */
-function tableContents(Backend $backend, string $alias): array
-{
-    $raw = $backend->configdpRun('filter list table', [$alias]);
-    $decoded = json_decode(trim((string)$raw), true);
-    if (!is_array($decoded)) {
-        return [];
-    }
-    $items = array_key_exists('items', $decoded) ? $decoded['items'] : $decoded;
-    $out = [];
-    foreach ((array)$items as $row) {
-        if (is_array($row)) {
-            if (isset($row['ip']) && is_string($row['ip'])) {
-                $out[] = $row['ip'];
-            }
-        } elseif (is_string($row) && $row !== '') {
-            $out[] = $row;
-        }
-    }
-    return $out;
-}
-
-/**
- * Make a pf table hold exactly $want, adding and deleting only the differences.
- *
- * @param list<string> $want
- * @return array{added: list<string>, removed: list<string>}
- */
-function syncTable(Backend $backend, string $table, array $want): array
-{
-    $diff = tableDiff($want, tableContents($backend, $table));
-    foreach ($diff['added'] as $addr) {
-        $backend->configdpRun('filter add table', [$table, $addr]);
-    }
-    foreach ($diff['removed'] as $addr) {
-        $backend->configdpRun('filter delete table', [$table, $addr]);
-    }
-    return $diff;
-}
-
-/**
- * Name and description of each item of a model's array field ('' for a field
- * the item does not have: rules have no name). For aliases this includes the
- * ones core and plugins generate, which config.xml does not hold.
- *
- * @return list<array{name: string, description: string}>
- */
-function modelRows(BaseField $items): array
-{
-    $rows = [];
-    foreach ($items->iterateItems() as $item) {
-        $rows[] = [
-            'name' => isset($item->name) ? $item->name->getValue() : '',
-            'description' => isset($item->description) ? $item->description->getValue() : '',
-        ];
-    }
-    return $rows;
-}
-
-/**
- * The same rows read from config.xml as loaded, for the elements at $xpath.
- * No model is built: building the Filter model runs configd calls and can
- * rewrite core's alias cache, which a status poll must not do.
- *
- * @return list<array{name: string, description: string}>
- */
-function configRows(string $xpath): array
-{
-    $rows = [];
-    /* SimpleXML nodes, not model fields, so a string cast is how their text is read */
-    foreach (Config::getInstance()->object()->xpath($xpath) ?: [] as $item) {
-        $rows[] = ['name' => (string)$item->name, 'description' => (string)$item->description];
-    }
-    return $rows;
-}
-
-/**
- * The first of $rows whose description starts with $marker, or null: how the
- * plugin finds its own objects, whatever they are called now.
- *
- * @param list<array{name: string, description: string}> $rows
- * @return ?array{name: string, description: string}
- */
-function findByMarker(array $rows, string $marker): ?array
-{
-    foreach ($rows as $row) {
-        if (strpos($row['description'], $marker) === 0) {
-            return $row;
-        }
-    }
-    return null;
-}
-
-/**
  * Why the messaging objects cannot be used, or null when they can. Their names
  * are fixed, and an alias with one of them that this plugin did not make is
  * never taken over.
@@ -603,31 +482,6 @@ function messagingObjectsProblem(array $aliases, array $rules): ?string
     return $problems === [] ? null : implode('; ', $problems);
 }
 
-/**
- * messaging.json, or null when it is missing or not readable as schema 1.
- *
- * @return ?array<string, mixed>
- */
-function messagingData(): ?array
-{
-    $raw = @file_get_contents(MSG_DATA_FILE);
-    $data = $raw === false ? null : json_decode($raw, true);
-    return is_array($data) && ($data['schema'] ?? null) === 1 ? $data : null;
-}
-
-/**
- * The server list's cache: the learned addresses, the last good downloads, and
- * the last refresh's time and errors. A missing or damaged file reads as empty,
- * entry by entry (sanitizeCache()).
- *
- * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>}
- */
-function readCache(): array
-{
-    $raw = @file_get_contents(MSG_CACHE_FILE);
-    return sanitizeCache($raw === false ? null : json_decode($raw, true));
-}
-
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
     $aliases = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
@@ -641,7 +495,7 @@ if ($mode === 'status') {
         $msgError = messagingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
             ?? (messagingData() === null ? MSG_DATA_MISSING : null);
     }
-    $cache = readCache();
+    $cache = readCache(MSG_CACHE_FILE);
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -899,107 +753,6 @@ printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), 
 
 /* ---- refresh the messaging server list ----------------------------------- */
 
-/**
- * Refresh the server list and load it into its table.
- *
- * Resolves the notification services' names and the selected apps' names, learns
- * the answers that the guard (protected names, shared CDNs) lets through unless a
- * protected name has no answer, this run or a recent one, downloads each published
- * list once a day (an hour after a failed download at the soonest), and makes the
- * servers table hold the learned addresses, the published ranges and the
- * notification services' ranges. A failed lookup or download never empties the
- * list: a learned address stays for a week, and a published list falls back to its
- * last good copy, then to the shipped one. Only taking an app out of the selection
- * starts the learned set again.
- *
- * @param array<string, mixed> $data  messaging.json
- * @param array<string>        $apps  the selected app ids
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
- *        readCache()
- * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: list<string>, refreshed_at: int, errors: list<string>}}
- *         this run's servers, the ones the table gained, and the cache to write
- */
-function refreshServerList(Backend $backend, array $data, array $apps, array $cache): array
-{
-    /* one try of one second per name, so a dead resolver spends the budget on
-       many names rather than the default several seconds on each */
-    putenv('RES_OPTIONS=timeout:1 attempts:1');
-    $lookup = function (string $host) {
-        $records = @dns_get_record($host, DNS_A);
-        return $records === false ? false : answerAddresses($records);
-    };
-    $nowMs = fn(): int => (int)(microtime(true) * 1000);
-    $selected = array_intersect_key($data['apps'], array_flip($apps));
-    $selectedIds = array_keys($selected);
-    sort($selectedIds);
-
-    $found = resolveAll(messagingHosts($selected, $data['notifications']), $lookup, 20000, $nowMs);
-    $answered = resolveAll($data['protected_hosts'], $lookup, 10000, $nowMs);
-    $now = time();
-    /* stamped with the hour, so the cache changes only when an answer does */
-    $hour = intdiv($now, 3600) * 3600;
-    $guard = protectedGuard($data['protected_hosts'], $answered['answers'], $cache['protected'], $hour, 7 * 86400);
-    $learned = updateLearned(
-        learnedForSelection($cache['learned'], $cache['apps'], $selectedIds),
-        $found['addresses'],
-        $guard,
-        $data['shared_cdn_ranges'],
-        $hour,
-        7 * 86400
-    );
-    $context = stream_context_create(['http' => ['timeout' => 10]]);
-    $published = refreshPublished(
-        $selected,
-        $cache['published'],
-        $now,
-        86400,
-        3600,
-        fn(string $url) => @file_get_contents($url, false, $context)
-    );
-
-    $dest = destinationSet(
-        $learned,
-        $published['ranges'],
-        $data['notifications']['apple_ranges'],
-        $data['notifications']['microsoft_ranges']
-    );
-    $diff = syncTable($backend, MSG_SERVERS_ALIAS, $dest);
-    printf("messaging servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
-
-    return [$dest, $diff['added'], [
-        'learned' => $learned,
-        'published' => $published['published'],
-        'protected' => $guard['memory'],
-        'apps' => $selectedIds,
-        'refreshed_at' => time(),
-        'errors' => refreshErrors([$found, $answered], $published['failed'], $guard['missing']),
-    ]];
-}
-
-/**
- * Replace the cache file in one step, so a run that dies half way leaves the old
- * file rather than half a new one. A failure goes to STDERR; the next run writes
- * it again.
- *
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
- */
-function writeCache(array $cache): void
-{
-    $tmp = MSG_CACHE_FILE . '.tmp';         /* the sync lock keeps this name to one run */
-    $json = json_encode([
-        'learned' => (object)$cache['learned'],         /* {} rather than [] when empty */
-        'published' => (object)$cache['published'],
-        'protected' => (object)$cache['protected'],
-        'apps' => $cache['apps'],
-        'refreshed_at' => $cache['refreshed_at'],
-        'errors' => $cache['errors'],
-    ], JSON_INVALID_UTF8_SUBSTITUTE);
-    if ($json === false || @file_put_contents($tmp, $json) === false
-        || !@chmod($tmp, 0600) || !@rename($tmp, MSG_CACHE_FILE)) {
-        fwrite(STDERR, 'messaging: cannot write ' . MSG_CACHE_FILE . "\n");
-    }
-}
-
 /* After the internet switch, so a slow resolver never delays it, and before the
    device table, so a device newly denied messaging meets this run's list. Only
    while in use: until then the list has no effect, so nothing is looked up or
@@ -1012,72 +765,21 @@ if ($msgObjectsOk && $msgInUse) {
     if ($data === null) {
         fwrite(STDERR, 'messaging: ' . MSG_DATA_MISSING . "\n");
     } else {
-        $cache = readCache();
+        $cache = readCache(MSG_CACHE_FILE);
         /* an exception must not stop the device table below */
         try {
-            [$dest, $addedDest, $cache] = refreshServerList($backend, $data, $msgApps, $cache);
+            [$dest, $addedDest, $cache] = refreshServerList($backend, MSG_SERVERS_ALIAS, $data, $msgApps, $cache);
         } catch (\Throwable $e) {
             $cache['errors'] = ['refresh failed: ' . $e->getMessage()];
         }
         foreach ($cache['errors'] as $error) {
             fwrite(STDERR, "messaging: $error\n");
         }
-        writeCache($cache);
+        writeCache(MSG_CACHE_FILE, $cache);
     }
 }
 
 /* ---- sync the messaging device table ------------------------------------- */
-
-/**
- * Drop the open connections that this run's messaging block should cut, as
- * dropPlan() says for each device in the device table, so an open chat or
- * notification channel does not carry on. Nothing else is touched (see
- * selectStatesToDrop()).
- *
- * Best effort, device by device: a failure goes to STDERR and the next device is
- * still done. An exception is also returned, so that status can show it.
- *
- * @param array<string> $targets   every address in the device table
- * @param array<string> $added     the ones added this run
- * @param array<string> $dest      this run's servers; [] when the list was not refreshed
- * @param array<string> $addedDest the servers added to their table this run
- * @return list<string> the exceptions, one line each
- */
-function dropMessagingStates(Backend $backend, array $targets, array $added, array $dest, array $addedDest): array
-{
-    $failures = [];
-    foreach ($targets as $target) {
-        try {
-            $plan = dropPlan($target, $added, $dest, $addedDest, NOTIFY_PORT_LO, NOTIFY_PORT_HI);
-            if ($plan === null) {
-                continue;
-            }
-            /* every state with the target on either side: an empty limit, offset,
-               label or sort is ignored */
-            $raw = $backend->configdpRun('filter list states', [$target, '', '', '', '']);
-            $rows = json_decode((string)$raw, true)['details'] ?? null;
-            if (!is_array($rows)) {
-                fwrite(STDERR, "messaging: cannot list the connections of $target\n");
-                continue;
-            }
-            foreach (selectStatesToDrop($rows, $plan['destinations'], $plan['portLo'], $plan['portHi']) as $id) {
-                /* "hexid/hexcreator", as core's own state page passes it */
-                if (!preg_match('/^([0-9a-f]+)\/([0-9a-f]+)$/i', $id, $m)) {
-                    fwrite(STDERR, "messaging: not a state id: $id\n");
-                    continue;
-                }
-                $answer = (string)$backend->configdpRun('filter kill state', [$m[1], $m[2]]);
-                if (!stateKilled($answer)) {
-                    fwrite(STDERR, "messaging: dropping state $id failed: " . trim($answer) . "\n");
-                }
-            }
-        } catch (\Throwable $e) {
-            $failures[] = "dropping connections of $target failed: " . $e->getMessage();
-            fwrite(STDERR, 'messaging: ' . end($failures) . "\n");
-        }
-    }
-    return $failures;
-}
 
 /* Every run, in use or not: a device switched back to "Not blocked", or the
    plugin disabled, must leave the table even when nobody else uses messaging.
@@ -1098,7 +800,7 @@ if ($msgObjectsOk) {
         /* status shows the errors the cache holds */
         if ($failures !== [] && $cache !== null) {
             $cache['errors'] = array_merge($cache['errors'], $failures);
-            writeCache($cache);
+            writeCache(MSG_CACHE_FILE, $cache);
         }
     }
 }

@@ -8,7 +8,7 @@
  *
  * No I/O, no side effects and no OPNsense classes, so this file loads anywhere
  * PHP runs: on the firewall from sync.php, and from tests/MessagingTest.php on
- * any machine. Everything that touches the firewall stays in sync.php.
+ * any machine. Everything that touches the firewall stays out of this file.
  */
 
 /**
