@@ -16,12 +16,19 @@
  * and needs no ruleset reload. Per-device rules were rejected: they do not
  * scale, they apply slowly, and arbitrary per-device schedules would need one
  * rule per distinct schedule.
+ *
+ * Messaging is blocked the same way, with objects of its own made on first use:
+ * a table of the devices denied messaging, a table of the servers they may not
+ * reach, and two floating rules, one to those servers and one to the
+ * notification ports.
  */
 
 require_once("config.inc");
 require_once("util.inc");
 
+use OPNsense\Base\BaseModel;
 use OPNsense\Base\FieldTypes\BaseField;
+use OPNsense\Base\FieldTypes\NetworkAliasField;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\Firewall\Alias;
@@ -34,6 +41,34 @@ use OPNsense\ParentalControl\ParentalControl;
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
 require_once(__DIR__ . '/lib/markers.php');
+require_once(__DIR__ . '/lib/messaging.php');
+
+/* the messaging aliases' fixed names, each with the marker that makes it ours */
+const MSG_ALIASES = [MSG_DEVICES_ALIAS => MARK_MSG_DEVICES, MSG_SERVERS_ALIAS => MARK_MSG_SERVERS];
+
+$mode = isset($argv[1]) ? $argv[1] : 'sync';
+
+/* One sync at a time: DNS lookups make a run's length depend on the network,
+   and cron starts one every minute. Taken before the configuration is read, so
+   a run that waited sees what the one before it saved instead of saving over
+   it. Status only reads, so it never waits. */
+if ($mode !== 'status') {
+    if (!is_dir(DATA_DIR)) {
+        @mkdir(DATA_DIR, 0700);         /* a run starting at the same moment may make it first */
+    }
+    $lock = @fopen(DATA_DIR . '/sync.lock', 'c');
+    if ($lock === false) {
+        fwrite(STDERR, "cannot open " . DATA_DIR . "/sync.lock\n");
+        exit(1);
+    }
+    for ($waited = 0; !flock($lock, LOCK_EX | LOCK_NB); $waited++) {
+        if ($waited >= 30) {
+            fwrite(STDERR, "another sync is still running\n");
+            exit(1);
+        }
+        sleep(1);
+    }
+}
 
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
    which would shift every window by the UTC offset while the UI agreed with
@@ -44,7 +79,6 @@ if ($tz !== '' && @timezone_open($tz) !== false) {
     date_default_timezone_set($tz);
 }
 
-$mode = isset($argv[1]) ? $argv[1] : 'sync';
 $mdl = new ParentalControl();
 $backend = new Backend();
 
@@ -85,7 +119,18 @@ function resolveDevice(BaseField $dev, bool $enabled): array
         return [true, 'always blocked'];
     }
 
-    /* scheduled - decided by a pure function so it can be tested directly */
+    return deviceSchedule($dev);
+}
+
+/**
+ * The device's schedule, evaluated now. Both the internet and the messaging
+ * decision read it here, so the two cannot come to disagree about it.
+ *
+ * @return array{bool, string} [blocked, reason]
+ */
+function deviceSchedule(BaseField $dev): array
+{
+    /* decided by a pure function so it can be tested directly */
     return scheduleDecision(
         array_filter(explode(',', $dev->weekdays->getValue())),
         (int)date('H') * 60 + (int)date('i'),
@@ -201,7 +246,7 @@ function ensureCronJob(Backend $backend, bool $enabled): void
         $job->who = 'root';
         $job->command = 'parentalcontrol sync';
         $job->parameters = '';
-        $job->description = 'Parental Control: evaluate device schedules';
+        $job->description = CRON_DESCRIPTION;
         $changed = true;
     } elseif (!$found->enabled->isEqual($want)) {
         $found->enabled = $want;
@@ -313,8 +358,18 @@ function timeToMinutes(string $v): ?int
 
 $devices = [];
 $blockSet = [];
+$msgBlockSet = [];
+$msgInUse = false;          /* the messaging objects are made on first use */
 foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
     list($blocked, $reason) = resolveDevice($dev, $enabled);
+    [$mBlocked, $mReason] = messagingDecision(
+        $enabled,
+        $dev->enabled->isEqual('1'),
+        $dev->messaging->getValue(),
+        deviceSchedule($dev)
+    );
+    $msgInUse = $msgInUse
+        || ($enabled && $dev->enabled->isEqual('1') && !$dev->messaging->isEqual('off'));
     $addr = trim($dev->address->getValue());
 
     /* a MAC is an identity, not something pf can match - resolve it to whatever
@@ -324,6 +379,9 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
         $resolved = empty($targets) ? '' : implode(', ', $targets);
         if (empty($targets) && $blocked) {
             $reason .= ' (MAC not currently resolvable)';
+        }
+        if (empty($targets) && $mBlocked) {
+            $mReason .= ' (MAC not currently resolvable)';
         }
     } else {
         $targets = $addr === '' ? [] : [$addr];
@@ -341,10 +399,18 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
         'enabled' => $dev->enabled->isEqual('1'),
         'blocked' => $blocked,
         'reason' => $reason,
+        'messaging' => $dev->messaging->getValue(),
+        'messaging_blocked' => $mBlocked,
+        'messaging_reason' => $mReason,
     ];
     if ($blocked) {
         foreach ($targets as $t) {
             $blockSet[$t] = true;
+        }
+    }
+    if ($mBlocked) {
+        foreach ($targets as $t) {
+            $msgBlockSet[$t] = true;
         }
     }
 }
@@ -383,8 +449,48 @@ function tableContents(Backend $backend, string $alias): array
     return $out;
 }
 
+/**
+ * Make a pf table hold exactly $want, adding and deleting only the differences.
+ *
+ * @param list<string> $want
+ * @return array{added: list<string>, removed: list<string>}
+ */
+function syncTable(Backend $backend, string $table, array $want): array
+{
+    $current = tableContents($backend, $table);
+    $added = array_values(array_diff($want, $current));
+    $removed = array_values(array_diff($current, $want));
+
+    foreach ($added as $addr) {
+        $backend->configdpRun('filter add table', [$table, $addr]);
+    }
+    foreach ($removed as $addr) {
+        $backend->configdpRun('filter delete table', [$table, $addr]);
+    }
+    return ['added' => $added, 'removed' => $removed];
+}
+
+/**
+ * Why the messaging objects cannot be used, or null when they can. Their names
+ * are fixed, and an alias with one of them that this plugin did not make is
+ * never taken over.
+ */
+function messagingConflict(Alias $aliasMdl): ?string
+{
+    $aliases = [];
+    foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
+        $aliases[] = ['name' => $item->name->getValue(), 'description' => $item->description->getValue()];
+    }
+    $names = aliasConflicts($aliases, MSG_ALIASES);
+    return $names === [] ? null : implode('; ', array_map(
+        fn(string $name): string => "alias name $name is used by an alias this plugin does not own",
+        $names
+    ));
+}
+
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
+    $msgError = messagingConflict(new Alias());
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -393,6 +499,17 @@ if ($mode === 'status') {
         'in_alias' => count($current),
         'alias_entries' => $current,
         'devices' => $devices,
+        'messaging' => [
+            'error' => $msgError,
+            'devices_table' => MSG_DEVICES_ALIAS,
+            'servers_table' => MSG_SERVERS_ALIAS,
+            /* under a conflict that table belongs to someone else's alias */
+            'entries' => $msgError === null ? count(tableContents($backend, MSG_SERVERS_ALIAS)) : 0,
+            'learned' => 0,
+            'refreshed_at' => null,
+            'apps' => array_values(array_filter(explode(',', $mdl->general->messaging_apps->getValue()))),
+            'errors' => [],
+        ],
     ]);
     exit(0);
 }
@@ -517,6 +634,124 @@ if ($ruleNode === null || $ruleChanged) {
         exit(1);
     }
 }
+
+/* ---- make sure the messaging aliases and rules exist --------------------- */
+
+/** Does an item of $items have a description starting with $marker? */
+function hasMarker(BaseField $items, string $marker): bool
+{
+    foreach ($items->iterateItems() as $item) {
+        if (strpos($item->description->getValue(), $marker) === 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Validate and save a model. On failure print why, as the script's other
+ * validation messages are printed, and save nothing.
+ */
+function saveModel(BaseModel $mdl, string $what): bool
+{
+    $val = $mdl->performValidation();
+    if ($val->count() > 0) {
+        foreach ($val->getMessages() as $msg) {
+            fwrite(STDERR, "$what: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
+        }
+        return false;
+    }
+    $mdl->serializeToConfig();
+    Config::getInstance()->save();
+    return true;
+}
+
+/**
+ * Create whichever messaging aliases and rules are missing, found by marker.
+ *
+ * Called while some device uses messaging, so the objects appear on first use;
+ * only uninstall removes them. When an alias that is not the plugin's holds one
+ * of the fixed names, nothing is created or changed. Errors are returned, never
+ * exited on: a messaging problem must not stop the internet block.
+ *
+ * @param bool $cfgChanged set when anything was saved, so that the caller's
+ *                         single filter reload covers it
+ * @return ?string null on success, else why messaging cannot be enforced
+ */
+function ensureMessagingObjects(bool &$cfgChanged): ?string
+{
+    $aliasMdl = new Alias();
+    $conflict = messagingConflict($aliasMdl);
+    if ($conflict !== null) {
+        return $conflict;
+    }
+
+    $aliasAdded = false;
+    foreach (MSG_ALIASES as $name => $marker) {
+        if (!hasMarker($aliasMdl->aliases->alias, $marker)) {
+            $node = $aliasMdl->aliases->alias->Add();
+            $node->name = $name;
+            $node->type = 'external';           /* contents managed here, not in config */
+            $node->enabled = '1';
+            $node->description = $marker;
+            $aliasAdded = true;
+        }
+    }
+    if ($aliasAdded) {
+        if (!saveModel($aliasMdl, 'alias')) {
+            return 'aliases failed validation';
+        }
+        $cfgChanged = true;
+        /* Core keeps the alias names a rule may use in a static list for the
+           whole process (BaseListField's option cache), and the internet rule's
+           Filter model above filled it before these two existed. Saving them
+           does not refresh it: drop it, or the rules below fail validation. */
+        (new NetworkAliasField())->resetStaticOptions();
+    }
+
+    /* the rules: [protocol, destination, destination port] */
+    $filterMdl = new Filter();
+    $ruleAdded = false;
+    foreach ([
+        MARK_MSG_RULE => ['any', MSG_SERVERS_ALIAS, ''],
+        MARK_NOTIFY_RULE => ['TCP', 'any', NOTIFY_PORTS],
+    ] as $marker => [$protocol, $destination, $port]) {
+        if (!hasMarker($filterMdl->rules->rule, $marker)) {
+            $rule = $filterMdl->rules->rule->Add();
+            $rule->enabled = '1';
+            $rule->action = 'block';
+            $rule->quick = '1';
+            $rule->direction = 'in';
+            $rule->ipprotocol = 'inet';
+            $rule->protocol = $protocol;
+            $rule->source_net = MSG_DEVICES_ALIAS;
+            $rule->destination_net = $destination;
+            $rule->destination_port = $port;
+            $rule->description = $marker;
+            $ruleAdded = true;
+        }
+    }
+    if ($ruleAdded) {
+        if (!saveModel($filterMdl, 'rule')) {
+            return 'rules failed validation';
+        }
+        $cfgChanged = true;
+    }
+    return null;
+}
+
+/* The objects are fine unless an alias that is not ours holds one of their
+   names. That is checked every run, in use or not, because the device table is
+   synced every run (below); only creating the objects waits for first use. */
+$msgError = messagingConflict($aliasMdl);
+$msgObjectsOk = $msgError === null;
+if ($msgObjectsOk && $msgInUse) {
+    $msgError = ensureMessagingObjects($cfgChanged);
+}
+if ($msgError !== null) {
+    fwrite(STDERR, "messaging: $msgError\n");
+}
+
 if ($cfgChanged) {
     $backend->configdRun('filter reload');
 }
@@ -531,24 +766,14 @@ if ($staleTable !== null) {
 
 /* ---- sync the table ------------------------------------------------------ */
 
-$current = tableContents($backend, $aliasName);
 $want = array_keys($blockSet);
-
-$toAdd = array_diff($want, $current);
-$toDel = array_diff($current, $want);
-
-foreach ($toAdd as $addr) {
-    $backend->configdpRun('filter add table', [$aliasName, $addr]);
-}
-foreach ($toDel as $addr) {
-    $backend->configdpRun('filter delete table', [$aliasName, $addr]);
-}
+$diff = syncTable($backend, $aliasName, $want);
 
 /* Established connections survive a new block, so a stream already running
    keeps going until it ends by itself. Dropping their states is what makes
    "off" mean off. Best effort: never fail the sync over it. */
 if ($mdl->general->kill_states->isEqual('1')) {
-    foreach ($toAdd as $addr) {
+    foreach ($diff['added'] as $addr) {
         /* pfctl -k takes a host. For a CIDR, explode()[0] is the network
            address - killing states for an address nobody holds. Skip those and
            say so rather than appearing to have done something. */
@@ -560,4 +785,20 @@ if ($mdl->general->kill_states->isEqual('1')) {
     }
 }
 
-printf("blocked=%d added=%d removed=%d\n", count($want), count($toAdd), count($toDel));
+printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), count($diff['removed']));
+
+/* ---- sync the messaging device table ------------------------------------- */
+
+/* Every run, in use or not: a device switched back to "Not blocked", or the
+   plugin disabled, must leave the table even when nobody else uses messaging.
+   Never under a conflict: that table belongs to someone else's alias. */
+if ($msgObjectsOk) {
+    $msgWant = array_keys($msgBlockSet);
+    $msgDiff = syncTable($backend, MSG_DEVICES_ALIAS, $msgWant);
+    printf(
+        "messaging blocked=%d added=%d removed=%d\n",
+        count($msgWant),
+        count($msgDiff['added']),
+        count($msgDiff['removed'])
+    );
+}

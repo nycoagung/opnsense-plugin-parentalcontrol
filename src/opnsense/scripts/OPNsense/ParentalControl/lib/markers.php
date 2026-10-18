@@ -21,6 +21,11 @@ const MARK_MSG_SERVERS = 'Parental Control: messaging servers';
 const MARK_MSG_RULE    = 'Parental Control: block messaging';
 const MARK_NOTIFY_RULE = 'Parental Control: block notification ports';
 
+/* The cron job's description. Not a marker: the job is found by its origin and
+   command. It lives here so that no 'Parental Control:' string is left in the
+   scripts themselves. */
+const CRON_DESCRIPTION = 'Parental Control: evaluate device schedules';
+
 /* Unlike the whole-internet alias, whose name is a setting, these are fixed. */
 const MSG_DEVICES_ALIAS = 'NoMessaging';
 const MSG_SERVERS_ALIAS = 'Messaging_Servers';
