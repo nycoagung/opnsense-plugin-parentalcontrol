@@ -2,8 +2,9 @@
 
 /**
  * Pure functions for the messaging block: the per-device decision, the IPv4
- * helpers, the builders of the server list, the choice of connections to drop and
- * the two checks setup and uninstall make before touching an alias.
+ * helpers, the builders of the server list and the reading of its cache, the
+ * choice of connections to drop and the two checks setup and uninstall make
+ * before touching an alias.
  *
  * No I/O, no side effects and no OPNsense classes, so this file loads anywhere
  * PHP runs: on the firewall from sync.php, and from tests/MessagingTest.php on
@@ -259,6 +260,141 @@ function resolveAll(array $hosts, callable $lookup, int $budgetMs, callable $now
     $addresses = array_unique($addresses);
     sort($addresses, SORT_STRING);
     return ['addresses' => $addresses, 'skipped' => $skipped, 'failed' => $failed];
+}
+
+/**
+ * The names to resolve: the selected apps' names, then the notification services'
+ * names, each once.
+ *
+ * The notification names are there whichever apps are selected, even none. The
+ * order is the same every run, and resolveAll() spends its time budget in it.
+ *
+ * @param array<array{hosts: list<string>}> $apps the selected apps' entries in
+ *        messaging.json
+ * @param array{google_hosts: list<string>, microsoft_hosts: list<string>} $notifications
+ *        messaging.json's notifications
+ * @return list<string>
+ */
+function messagingHosts(array $apps, array $notifications): array
+{
+    $hosts = [];
+    foreach ($apps as $app) {
+        $hosts = array_merge($hosts, $app['hosts']);
+    }
+    $hosts = array_merge($hosts, $notifications['google_hosts'], $notifications['microsoft_hosts']);
+    return array_values(array_unique($hosts));
+}
+
+/**
+ * The learned set after this run: the cached addresses that this run's guard
+ * still lets through, with this run's answers that pass it merged in
+ * (mergeLearned()).
+ *
+ * The cached addresses go through filterCandidates() again because the guard can
+ * change under them: a protected name may start resolving to an address learned
+ * earlier, or a plugin update may widen the CDN list. A protected address must
+ * not stay blocked for the week a learned address lives.
+ *
+ * @param array<string, int> $learned        address => time last seen, from the cache
+ * @param array<string>      $fresh          this run's answers
+ * @param array<string>      $protectedAddrs what the protected names resolved to this run
+ * @param array<string>      $cdnRanges      IPv4 CIDRs of shared CDNs
+ * @return array<string, int>
+ */
+function updateLearned(
+    array $learned,
+    array $fresh,
+    array $protectedAddrs,
+    array $cdnRanges,
+    int $now,
+    int $maxAge
+): array {
+    $dropped = filterCandidates(array_keys($learned), $protectedAddrs, $cdnRanges)['dropped'];
+    $kept = filterCandidates($fresh, $protectedAddrs, $cdnRanges)['kept'];
+    return mergeLearned(array_diff_key($learned, $dropped), $kept, $now, $maxAge);
+}
+
+/**
+ * The selected apps' published ranges, downloading an app's list again once its
+ * last good copy is missing or more than $maxAge seconds old.
+ *
+ * A download that yields no ranges (an error, an error page, an empty body) has
+ * failed: the last good copy keeps its time, so the next run tries again. Each
+ * app's ranges are choosePublished() of this run's download, the last good one
+ * and the shipped copy. An app with no ranges_url uses its shipped ranges only,
+ * never a copy the cache kept from a version that had one.
+ *
+ * @param array<string, array{ranges_url?: ?string, ranges?: list<string>}> $apps the
+ *        selected apps' entries in messaging.json, by id
+ * @param array<string, array{ranges: list<string>, fetched_at: int}> $published
+ *        the last good downloads, by app id
+ * @param callable(string): (string|false) $fetch the body at a URL, or false when
+ *        the download failed
+ * @return array{ranges: array<string>, published: array<string, array{ranges: list<string>, fetched_at: int}>, failed: list<string>}
+ *         every app's ranges together, the last good downloads after this run, and
+ *         the ids of the apps whose download failed
+ */
+function refreshPublished(array $apps, array $published, int $now, int $maxAge, callable $fetch): array
+{
+    $ranges = [];
+    $failed = [];
+    foreach ($apps as $id => $app) {
+        $url = (string)($app['ranges_url'] ?? '');
+        $fresh = [];
+        if ($url !== '' && (!isset($published[$id]) || $now - $published[$id]['fetched_at'] > $maxAge)) {
+            $body = $fetch($url);
+            $fresh = $body === false ? [] : parseRanges($body);
+            if ($fresh === []) {
+                $failed[] = (string)$id;
+            } else {
+                $published[$id] = ['ranges' => $fresh, 'fetched_at' => $now];
+            }
+        }
+        $lastGood = $url === '' ? [] : ($published[$id]['ranges'] ?? []);
+        $ranges = array_merge($ranges, choosePublished($fresh, $lastGood, $app['ranges'] ?? []));
+    }
+    return ['ranges' => $ranges, 'published' => $published, 'failed' => $failed];
+}
+
+/**
+ * The cache file's content, keeping only what has the shape sync.php writes.
+ *
+ * The file is the plugin's own, but a damaged copy must neither put a wrong entry
+ * in a pf table nor stop the refresh, so each entry is judged on its own and a bad
+ * one is dropped, as if it had never been there: a learned entry needs an IPv4
+ * address and an integer time, a published one a list of IPv4 ranges and an
+ * integer time. Anything but an array is an empty cache.
+ *
+ * @param mixed $raw the file's JSON, decoded to arrays
+ * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>}
+ */
+function sanitizeCache(mixed $raw): array
+{
+    $raw = is_array($raw) ? $raw : [];
+    $learned = [];
+    foreach ((array)($raw['learned'] ?? []) as $ip => $seen) {
+        if (isIpv4((string)$ip) && is_int($seen)) {
+            $learned[$ip] = $seen;
+        }
+    }
+    $published = [];
+    foreach ((array)($raw['published'] ?? []) as $id => $entry) {
+        if (!is_array($entry) || !is_int($entry['fetched_at'] ?? null) || !is_array($entry['ranges'] ?? null)
+            || !array_is_list($entry['ranges'])) {
+            continue;
+        }
+        $ranges = array_filter($entry['ranges'], fn($r): bool => is_string($r) && isIpv4Cidr($r));
+        if ($ranges === $entry['ranges']) {
+            $published[$id] = ['ranges' => $ranges, 'fetched_at' => $entry['fetched_at']];
+        }
+    }
+    $errors = $raw['errors'] ?? [];
+    return [
+        'learned' => $learned,
+        'published' => $published,
+        'refreshed_at' => is_int($raw['refreshed_at'] ?? null) ? $raw['refreshed_at'] : null,
+        'errors' => is_array($errors) ? array_values(array_filter($errors, 'is_string')) : [],
+    ];
 }
 
 /**

@@ -267,6 +267,138 @@ check('resolve: addresses sorted',
     resolveAll(['a.example'], fn($h) => ['198.51.100.9', '198.51.100.7'], 1000, $frozen)['addresses'],
     ['198.51.100.7', '198.51.100.9']);
 
+/* ---- messagingHosts -------------------------------------------------------- */
+
+/* y.example is under both apps and z.example also among the notification names */
+$hostApps = ['a' => ['hosts' => ['x.example', 'y.example']], 'b' => ['hosts' => ['y.example', 'z.example']]];
+$notify = ['google_hosts' => ['z.example', 'g.example'], 'microsoft_hosts' => ['m.example']];
+check('hosts: the apps\' names, then the notification names, each once',
+    messagingHosts($hostApps, $notify),
+    ['x.example', 'y.example', 'z.example', 'g.example', 'm.example']);
+/* notifications are cut whichever apps are selected, even none */
+check('hosts: with no app selected the notification names are still looked up',
+    messagingHosts([], $notify),
+    ['z.example', 'g.example', 'm.example']);
+
+/* ---- updateLearned --------------------------------------------------------- */
+
+/* The guard can change under an address learned earlier: a protected name may start
+   resolving to it, or an update may widen the CDN list. Either must take it out of
+   the list now, not when it expires a week later. */
+check('learned: a protected name now resolving to a learned address takes it out',
+    updateLearned(['198.51.100.7' => $now - $day, '198.51.100.8' => $now - $day], [],
+        ['198.51.100.7'], [], $now, $maxAge),
+    ['198.51.100.8' => $now - $day]);
+check('learned: a wider CDN list takes a learned address out',
+    updateLearned(['198.51.100.7' => $now - $day, '203.0.113.9' => $now - $day], [],
+        [], ['198.51.100.0/24'], $now, $maxAge),
+    ['203.0.113.9' => $now - $day]);
+/* .7 is protected and .5 a CDN address, so neither is learned; .9, known already,
+   is seen again */
+check('learned: this run\'s answers pass the same guard before they are learned',
+    updateLearned(['203.0.113.9' => $now - $day],
+        ['198.51.100.7', '192.0.2.5', '203.0.113.9', '203.0.113.10'],
+        ['198.51.100.7'], ['192.0.2.0/24'], $now, $maxAge),
+    ['203.0.113.10' => $now, '203.0.113.9' => $now]);
+check('learned: an address not seen for the maximum age is forgotten',
+    updateLearned(['203.0.113.9' => $now - $maxAge - 1], [], [], [], $now, $maxAge),
+    []);
+
+/* ---- refreshPublished ------------------------------------------------------ */
+
+/* A fake download that records each URL it is asked for and answers from $answers
+   (false, a failed download, for any URL not in it). Each check sets both first. */
+$fetched = [];
+$answers = [];
+$fetch = function (string $url) use (&$fetched, &$answers) {
+    $fetched[] = $url;
+    return $answers[$url] ?? false;
+};
+$url = 'https://ranges.example/cidr.txt';
+$listed = ['ranges_url' => $url, 'ranges' => ['192.0.2.0/24']];
+$unlisted = ['ranges_url' => null, 'ranges' => ['203.0.113.0/28']];
+$old = ['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day - 1];
+
+$fetched = [];
+$answers = [$url => "198.51.100.0/24\n"];
+check('published: a list never downloaded is downloaded and kept with its time',
+    [refreshPublished(['t' => $listed, 'n' => $unlisted], [], $now, $day, $fetch), $fetched],
+    [['ranges' => ['198.51.100.0/24', '203.0.113.0/28'],
+      'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
+      'failed' => []],
+     [$url]]);
+/* exactly a day old is not yet more than a day old */
+$fetched = [];
+check('published: a list a day old is not downloaded again',
+    [refreshPublished(['t' => $listed], ['t' => ['ranges' => ['203.0.113.64/26'], 'fetched_at' => $now - $day]],
+        $now, $day, $fetch)['ranges'], $fetched],
+    [['203.0.113.64/26'], []]);
+$fetched = [];
+check('published: a list more than a day old is downloaded again',
+    [refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $fetch), $fetched],
+    [['ranges' => ['198.51.100.0/24'],
+      'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]],
+      'failed' => []],
+     [$url]]);
+/* the old time stays, so the next run tries again */
+$answers = [];
+check('published: a failed download keeps the last good list and its time',
+    refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $fetch),
+    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old], 'failed' => ['t']]);
+$answers = [$url => "<html>\n198.51.100.0/24\n</html>"];
+check('published: a download with no ranges in it is a failed download',
+    refreshPublished(['t' => $listed], ['t' => $old], $now, $day, $fetch),
+    ['ranges' => ['203.0.113.64/26'], 'published' => ['t' => $old], 'failed' => ['t']]);
+$answers = [];
+check('published: with no good download yet the shipped ranges are used',
+    refreshPublished(['t' => $listed], [], $now, $day, $fetch),
+    ['ranges' => ['192.0.2.0/24'], 'published' => [], 'failed' => ['t']]);
+/* a list kept from a version whose data still had the app's list address */
+$fetched = [];
+check('published: an app with no list address uses only its shipped ranges',
+    [refreshPublished(['n' => $unlisted], ['n' => $old], $now, $day, $fetch), $fetched],
+    [['ranges' => ['203.0.113.0/28'], 'published' => ['n' => $old], 'failed' => []], []]);
+
+/* ---- sanitizeCache --------------------------------------------------------- */
+
+$emptyCache = ['learned' => [], 'published' => [], 'refreshed_at' => null, 'errors' => []];
+$goodCache = [
+    'learned' => ['198.51.100.7' => $now],
+    'published' => ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now - $day]],
+    'refreshed_at' => $now,
+    'errors' => ['lookup failed: a.example'],
+];
+check('cache: a well-formed cache is kept as it is', sanitizeCache($goodCache), $goodCache);
+check('cache: anything else at the top is an empty cache',
+    [sanitizeCache(null), sanitizeCache('x'), sanitizeCache(new stdClass()),
+     sanitizeCache(['learned' => 5, 'published' => 'x'])],
+    [$emptyCache, $emptyCache, $emptyCache, $emptyCache]);
+/* entry by entry: one bad entry costs only itself */
+check('cache: learned entries are judged one by one',
+    sanitizeCache(['learned' => ['198.51.100.7' => $now, 'not-an-ip' => $now, '198.51.100.0/24' => $now,
+        '2001:db8::1' => $now, '198.51.100.8' => (string)$now, '198.51.100.9' => 1.5, '198.51.100.10' => null]])
+        ['learned'],
+    ['198.51.100.7' => $now]);
+check('cache: published entries are judged one by one',
+    sanitizeCache(['published' => [
+        't' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now],
+        'a' => ['ranges' => '198.51.100.0/24', 'fetched_at' => $now],
+        'b' => ['ranges' => ['198.51.100.0/24', 7], 'fetched_at' => $now],
+        'c' => ['ranges' => ['bogus'], 'fetched_at' => $now],
+        'd' => ['ranges' => ['x' => '198.51.100.0/24'], 'fetched_at' => $now],
+        'e' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => (string)$now],
+        'f' => ['ranges' => ['198.51.100.0/24']],
+        'g' => 'x',
+        'h' => ['ranges' => [['198.51.100.0/24']], 'fetched_at' => $now],
+        'i' => new stdClass(),
+    ]])['published'],
+    ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]]);
+check('cache: a refresh time or errors of the wrong type are dropped',
+    [sanitizeCache(['refreshed_at' => (string)$now, 'errors' => ['a', 7, null, 'b']]),
+     sanitizeCache(['refreshed_at' => $now, 'errors' => 'a'])],
+    [['learned' => [], 'published' => [], 'refreshed_at' => null, 'errors' => ['a', 'b']],
+     ['learned' => [], 'published' => [], 'refreshed_at' => $now, 'errors' => []]]);
+
 /* ---- selectStatesToDrop ---------------------------------------------------- */
 
 /* Rows are as `configctl filter list states` prints them (its "details"); only

@@ -52,6 +52,11 @@ const MSG_RULES = [
     MARK_NOTIFY_RULE => ['TCP', 'any', NOTIFY_PORTS],
 ];
 
+/* the server list's data, shipped beside this script, and what the refresh keeps */
+const MSG_DATA_FILE = __DIR__ . '/messaging.json';
+const MSG_CACHE_FILE = DATA_DIR . '/messaging-cache.json';
+const MSG_DATA_MISSING = 'messaging data missing or unreadable';
+
 $mode = isset($argv[1]) ? $argv[1] : 'sync';
 
 /* One sync at a time: DNS lookups make a run's length depend on the network,
@@ -101,6 +106,8 @@ if ($aliasName === '') {
 }
 $localAlias = $aliasName . '_Local';
 $enabled = $mdl->general->enabled->isEqual('1');
+/* the apps whose servers are blocked, one list for every device */
+$msgApps = array_values(array_filter(explode(',', $mdl->general->messaging_apps->getValue())));
 
 /**
  * Resolve one device to blocked/allowed plus a human reason.
@@ -598,17 +605,45 @@ function messagingObjectsProblem(array $aliases, array $rules): ?string
     return $problems === [] ? null : implode('; ', $problems);
 }
 
+/**
+ * messaging.json, or null when it is missing or not readable as schema 1.
+ *
+ * @return ?array<string, mixed>
+ */
+function messagingData(): ?array
+{
+    $raw = @file_get_contents(MSG_DATA_FILE);
+    $data = $raw === false ? null : json_decode($raw, true);
+    return is_array($data) && ($data['schema'] ?? null) === 1 ? $data : null;
+}
+
+/**
+ * The server list's cache: the learned addresses, the last good downloads, and
+ * the last refresh's time and errors. A missing or damaged file reads as empty,
+ * entry by entry (sanitizeCache()).
+ *
+ * @return array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>}
+ */
+function readCache(): array
+{
+    $raw = @file_get_contents(MSG_CACHE_FILE);
+    return sanitizeCache($raw === false ? null : json_decode($raw, true));
+}
+
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
     $aliases = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
     $msgConflict = messagingConflict($aliases);
-    /* While in use the objects must exist under their fixed names, or a device
-       shown as denied messaging has nothing enforcing it. Out of use their
-       absence is normal. A conflict says more, so it wins. */
+    /* While in use the objects must exist under their fixed names, and the data
+       must be readable, or a device shown as denied messaging has nothing
+       enforcing it. Out of use their absence is normal. A conflict says more,
+       so it wins. */
     $msgError = $msgConflict;
     if ($msgError === null && $msgInUse) {
-        $msgError = messagingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'));
+        $msgError = messagingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
+            ?? (messagingData() === null ? MSG_DATA_MISSING : null);
     }
+    $cache = readCache();
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -623,10 +658,12 @@ if ($mode === 'status') {
             'servers_table' => MSG_SERVERS_ALIAS,
             /* under a conflict that table belongs to someone else's alias */
             'entries' => $msgConflict === null ? count(tableContents($backend, MSG_SERVERS_ALIAS)) : 0,
-            'learned' => 0,
-            'refreshed_at' => null,
-            'apps' => array_values(array_filter(explode(',', $mdl->general->messaging_apps->getValue()))),
-            'errors' => [],
+            'learned' => count($cache['learned']),
+            /* nothing is refreshed while out of use, so the last refresh's time
+               and errors would describe an older use */
+            'refreshed_at' => $msgInUse ? $cache['refreshed_at'] : null,
+            'apps' => $msgApps,
+            'errors' => $msgInUse ? $cache['errors'] : [],
         ],
     ]);
     exit(0);
@@ -862,7 +899,180 @@ if ($mdl->general->kill_states->isEqual('1')) {
 
 printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), count($diff['removed']));
 
+/* ---- refresh the messaging server list ----------------------------------- */
+
+/**
+ * Refresh the server list and load it into its table.
+ *
+ * Resolves the selected apps' names and the notification services' names, learns
+ * the answers that the guard (protected names, shared CDNs) lets through,
+ * downloads each published list once a day, and makes the servers table hold the
+ * learned addresses, the published ranges and the notification services' ranges.
+ * A failed lookup or download never empties the list: a learned address stays for
+ * a week, and a published list falls back to its last good copy, then to the
+ * shipped one.
+ *
+ * @param array<string, mixed> $data  messaging.json
+ * @param array<string>        $apps  the selected app ids
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>} $cache
+ *        readCache()
+ * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: int, errors: list<string>}}
+ *         this run's servers, the ones the table gained, and the cache to write
+ */
+function refreshServerList(Backend $backend, array $data, array $apps, array $cache): array
+{
+    /* one try of one second per name, so a dead resolver spends the budget on
+       many names rather than the default several seconds on each */
+    putenv('RES_OPTIONS=timeout:1 attempts:1');
+    $lookup = function (string $host) {
+        $records = @dns_get_record($host, DNS_A);
+        return $records === false ? false : array_column($records, 'ip');
+    };
+    $nowMs = fn(): int => (int)(microtime(true) * 1000);
+    $selected = array_intersect_key($data['apps'], array_flip($apps));
+
+    $found = resolveAll(messagingHosts($selected, $data['notifications']), $lookup, 20000, $nowMs);
+    $guard = resolveAll($data['protected_hosts'], $lookup, 10000, $nowMs);
+    $now = time();
+    /* stamped with the hour, so the set changes only when an address does */
+    $learned = updateLearned(
+        $cache['learned'],
+        $found['addresses'],
+        $guard['addresses'],
+        $data['shared_cdn_ranges'],
+        intdiv($now, 3600) * 3600,
+        7 * 86400
+    );
+    $context = stream_context_create(['http' => ['timeout' => 10]]);
+    $published = refreshPublished(
+        $selected,
+        $cache['published'],
+        $now,
+        86400,
+        fn(string $url) => @file_get_contents($url, false, $context)
+    );
+
+    $dest = destinationSet(
+        $learned,
+        $published['ranges'],
+        $data['notifications']['apple_ranges'],
+        $data['notifications']['microsoft_ranges']
+    );
+    $diff = syncTable($backend, MSG_SERVERS_ALIAS, $dest);
+    printf("messaging servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
+
+    $errors = [];
+    foreach ([$found, $guard] as $result) {
+        foreach ($result['failed'] as $host) {
+            $errors[] = "lookup failed: $host";
+        }
+        foreach ($result['skipped'] as $host) {
+            $errors[] = "lookup skipped (time budget): $host";
+        }
+    }
+    foreach ($published['failed'] as $app) {
+        $errors[] = "range download failed: $app";
+    }
+    return [$dest, $diff['added'], [
+        'learned' => $learned,
+        'published' => $published['published'],
+        'refreshed_at' => time(),
+        'errors' => $errors,
+    ]];
+}
+
+/**
+ * Replace the cache file in one step, so a run that dies half way leaves the old
+ * file rather than half a new one. A failure goes to STDERR; the next run writes
+ * it again.
+ *
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int}>, refreshed_at: ?int, errors: list<string>} $cache
+ */
+function writeCache(array $cache): void
+{
+    $tmp = MSG_CACHE_FILE . '.tmp';         /* the sync lock keeps this name to one run */
+    $json = json_encode([
+        'learned' => (object)$cache['learned'],         /* {} rather than [] when empty */
+        'published' => (object)$cache['published'],
+        'refreshed_at' => $cache['refreshed_at'],
+        'errors' => $cache['errors'],
+    ], JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($json === false || @file_put_contents($tmp, $json) === false
+        || !@chmod($tmp, 0600) || !@rename($tmp, MSG_CACHE_FILE)) {
+        fwrite(STDERR, 'messaging: cannot write ' . MSG_CACHE_FILE . "\n");
+    }
+}
+
+/* After the internet switch, so a slow resolver never delays it, and before the
+   device table, so a device newly denied messaging meets this run's list. Only
+   while in use: until then the list has no effect, so nothing is looked up or
+   downloaded and the servers table is left as it is. */
+$dest = [];             /* this run's servers, for dropping connections below */
+$addedDest = [];        /* the servers this run added to their table */
+$cache = null;          /* the cache this run wrote; null when it did not refresh */
+if ($msgObjectsOk && $msgInUse) {
+    $data = messagingData();
+    if ($data === null) {
+        fwrite(STDERR, 'messaging: ' . MSG_DATA_MISSING . "\n");
+    } else {
+        $cache = readCache();
+        /* an exception must not stop the device table below */
+        try {
+            [$dest, $addedDest, $cache] = refreshServerList($backend, $data, $msgApps, $cache);
+        } catch (\Throwable $e) {
+            $cache['errors'] = ['refresh failed: ' . $e->getMessage()];
+        }
+        foreach ($cache['errors'] as $error) {
+            fwrite(STDERR, "messaging: $error\n");
+        }
+        writeCache($cache);
+    }
+}
+
 /* ---- sync the messaging device table ------------------------------------- */
+
+/**
+ * Drop the open connections that this run's messaging block should cut.
+ *
+ * A device that entered the device table this run loses its connections to this
+ * run's servers and to the notification ports, so an open chat or notification
+ * channel does not carry on. A device that was in it already loses only its
+ * connections to the servers added this run. Nothing else is touched (see
+ * selectStatesToDrop()). Best effort: a failure goes to STDERR and the sync goes on.
+ *
+ * @param array<string> $targets   every address in the device table
+ * @param array<string> $added     the ones added this run
+ * @param array<string> $dest      this run's servers; [] when the list was not refreshed
+ * @param array<string> $addedDest the servers added to their table this run
+ */
+function dropMessagingStates(Backend $backend, array $targets, array $added, array $dest, array $addedDest): void
+{
+    foreach ($targets as $target) {
+        $isNew = in_array($target, $added, true);
+        if (!$isNew && $addedDest === []) {
+            continue;
+        }
+        /* every state with the target on either side: an empty limit, offset,
+           label or sort is ignored */
+        $raw = $backend->configdpRun('filter list states', [$target, '', '', '', '']);
+        $rows = json_decode((string)$raw, true)['details'] ?? null;
+        if (!is_array($rows)) {
+            fwrite(STDERR, "messaging: cannot list the connections of $target\n");
+            continue;
+        }
+        $ids = $isNew
+            ? selectStatesToDrop($rows, $dest, NOTIFY_PORT_LO, NOTIFY_PORT_HI)
+            : selectStatesToDrop($rows, $addedDest, 1, 0);      /* 1..0 holds no port */
+        foreach ($ids as $id) {
+            /* "hexid/hexcreator", as core's own state page passes it */
+            if (!preg_match('/^([0-9a-f]+)\/([0-9a-f]+)$/i', $id, $m)) {
+                fwrite(STDERR, "messaging: not a state id: $id\n");
+                continue;
+            }
+            $backend->configdpRun('filter kill state', [$m[1], $m[2]]);
+        }
+    }
+}
 
 /* Every run, in use or not: a device switched back to "Not blocked", or the
    plugin disabled, must leave the table even when nobody else uses messaging.
@@ -876,4 +1086,18 @@ if ($msgObjectsOk) {
         count($msgDiff['added']),
         count($msgDiff['removed'])
     );
+
+    /* As for the internet switch, a new block must also cut what is already open. */
+    if ($mdl->general->kill_states->isEqual('1')) {
+        try {
+            dropMessagingStates($backend, $msgWant, $msgDiff['added'], $dest, $addedDest);
+        } catch (\Throwable $e) {
+            fwrite(STDERR, 'messaging: dropping connections failed: ' . $e->getMessage() . "\n");
+            /* status shows the errors the cache holds */
+            if ($cache !== null) {
+                $cache['errors'][] = 'dropping connections failed: ' . $e->getMessage();
+                writeCache($cache);
+            }
+        }
+    }
 }
