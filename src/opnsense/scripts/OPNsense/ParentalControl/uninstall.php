@@ -8,7 +8,11 @@
  * deliberate: this runs as a configd action, and a script that deleted its own
  * action file and then restarted configd would be killed partway through.
  *
- * Order matters. The pf table is flushed and the rule deleted before the
+ * Nothing is changed while anything else in the configuration refers to one of
+ * the plugin's aliases: deleting the alias would leave that rule, or whatever it
+ * is, pointing at nothing. The places are listed and the exit status is 1.
+ *
+ * Order matters. The pf tables are flushed and the rules deleted before the
  * aliases go, so nothing is left blocked by an object that no longer has an
  * owner. Everything is matched by description marker, so a renamed alias is
  * still found.
@@ -25,33 +29,89 @@ use OPNsense\Cron\Cron;
 use OPNsense\Firewall\Alias;
 use OPNsense\Firewall\Filter;
 
-require_once(__DIR__ . '/lib/markers.php');
+foreach (['markers.php', 'messaging.php'] as $lib) {
+    /* an older installer's file list leaves out the files added since */
+    if (!is_file(__DIR__ . "/lib/$lib")) {
+        fwrite(STDERR, "plugin files incomplete (missing lib/$lib): run 'configctl parentalcontrol install' again\n");
+        exit(1);
+    }
+    require_once(__DIR__ . "/lib/$lib");
+}
+
+/* Hold the sync lock, as sync.php does, and read the configuration again once it
+   is held: a sync that is mid-run would otherwise save its own copy after this
+   one and put back what this removes. */
+if (!is_dir(DATA_DIR)) {
+    @mkdir(DATA_DIR, 0700);         /* a sync starting at the same moment may make it first */
+}
+$lock = @fopen(DATA_DIR . '/sync.lock', 'c');
+if ($lock === false) {
+    fwrite(STDERR, "cannot open " . DATA_DIR . "/sync.lock\n");
+    exit(1);
+}
+for ($waited = 0; !flock($lock, LOCK_EX | LOCK_NB); $waited++) {
+    if ($waited >= 30) {
+        fwrite(STDERR, "not removing anything: a sync is still running\n");
+        exit(1);
+    }
+    sleep(1);
+}
+Config::getInstance()->forceReload();
+
+/* 1. the plugin's own aliases and rules, found by marker whatever they are called now */
+$aliasMdl = new Alias();
+$aliasUuids = [];           /* uuid => name */
+$tables = [];               /* the external aliases' names: pf holds their addresses */
+foreach ($aliasMdl->aliases->alias->iterateItems() as $uuid => $item) {
+    foreach ([MARK_BLOCK, MARK_LOCAL, MARK_MSG_DEVICES, MARK_MSG_SERVERS] as $marker) {
+        if (strpos($item->description->getValue(), $marker) === 0) {
+            $aliasUuids[$uuid] = $item->name->getValue();
+            if ($marker !== MARK_LOCAL) {
+                $tables[] = $item->name->getValue();
+            }
+            break;
+        }
+    }
+}
+$filterMdl = new Filter();
+$ruleUuids = [];
+foreach ($filterMdl->rules->rule->iterateItems() as $uuid => $rule) {
+    foreach ([MARK_RULE, MARK_MSG_RULE, MARK_NOTIFY_RULE] as $marker) {
+        if (strpos($rule->description->getValue(), $marker) === 0) {
+            $ruleUuids[] = $uuid;
+            break;
+        }
+    }
+}
+
+/* 2. before any change: refuse while anything else refers to one of the aliases */
+$xml = @file_get_contents('/conf/config.xml');
+if ($xml === false) {
+    fwrite(STDERR, "not removing anything: could not read /conf/config.xml\n");
+    exit(1);
+}
+$refs = findForeignReferences($xml, array_merge(array_keys($aliasUuids), $ruleUuids),
+    array_values($aliasUuids));
+if ($refs === [CONFIG_UNPARSED]) {
+    fwrite(STDERR, 'not removing anything: ' . CONFIG_UNPARSED . "\n");
+    exit(1);
+}
+if ($refs !== []) {
+    fwrite(STDERR, "not removing anything: these refer to the plugin's aliases:\n" . implode("\n", $refs) . "\n");
+    exit(1);
+}
 
 $backend = new Backend();
 $removed = [];
 
-/* 1. flush the pf table first - after the alias is gone it cannot be addressed,
-      and anything still in it would keep matching until the reload lands */
-$aliasMdl = new Alias();
-$blockName = null;
-foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
-    if (strpos($item->description->getValue(), MARK_BLOCK) === 0) {
-        $blockName = $item->name->getValue();
-    }
-}
-if ($blockName !== null) {
-    $backend->configdpRun('filter delete table', [$blockName, 'ALL']);
-    $removed[] = "flushed table $blockName";
+/* 3. flush the pf tables first - after an alias is gone its table cannot be
+      addressed, and anything still in it would keep matching until the reload lands */
+foreach ($tables as $name) {
+    $backend->configdpRun('filter delete table', [$name, 'ALL']);
+    $removed[] = "flushed table $name";
 }
 
-/* 2. the rule, before the aliases it references */
-$filterMdl = new Filter();
-$ruleUuids = [];
-foreach ($filterMdl->rules->rule->iterateItems() as $uuid => $rule) {
-    if (strpos($rule->description->getValue(), MARK_RULE) === 0) {
-        $ruleUuids[] = $uuid;
-    }
-}
+/* 4. the rules, before the aliases they reference */
 foreach ($ruleUuids as $uuid) {
     $filterMdl->rules->rule->del($uuid);
     $removed[] = 'rule ' . substr($uuid, 0, 8);
@@ -60,14 +120,7 @@ if (!empty($ruleUuids)) {
     $filterMdl->serializeToConfig();
 }
 
-/* 3. both aliases */
-$aliasUuids = [];
-foreach ($aliasMdl->aliases->alias->iterateItems() as $uuid => $item) {
-    $d = $item->description->getValue();
-    if (strpos($d, MARK_BLOCK) === 0 || strpos($d, MARK_LOCAL) === 0) {
-        $aliasUuids[$uuid] = $item->name->getValue();
-    }
-}
+/* 5. the aliases */
 foreach ($aliasUuids as $uuid => $name) {
     $aliasMdl->aliases->alias->del($uuid);
     $removed[] = "alias $name";
@@ -76,7 +129,7 @@ if (!empty($aliasUuids)) {
     $aliasMdl->serializeToConfig();
 }
 
-/* 4. our cron job */
+/* 6. our cron job */
 $cron = new Cron();
 $jobUuids = [];
 foreach ($cron->jobs->job->iterateItems() as $uuid => $job) {
