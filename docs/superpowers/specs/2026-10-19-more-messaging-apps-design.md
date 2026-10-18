@@ -79,7 +79,7 @@ Today the protected names include six Meta names (`facebook.com`, `www.facebook.
 
 ## Lookups
 
-- The order stays: notification names, then each selected app's hosts in their listed order, without duplicates. Facebook & Instagram's list starts with the realtime and chat names.
+- Notification names still go first. The selected apps' names then go **in turns**: each app's first name, then each app's second name, and so on, without duplicates (builder's call: with the apps in key order, Facebook & Instagram's 42 names would push WhatsApp's to the end, so a slow resolver would skip WhatsApp first). Each app's own list keeps its order, and Facebook & Instagram's list starts with the realtime and chat names. Names skipped in a run keep their remembered addresses, as today.
 - With every app selected a run looks up about 100 names. The 20-second budget for app and notification names and the 10-second budget for protected names stay as they are; names that do not fit are reported as skipped, as today.
 
 ## The data generator
@@ -90,15 +90,16 @@ Today the protected names include six Meta names (`facebook.com`, `www.facebook.
 ## Tests
 
 - **Data:** the three ids and labels; model options, labels and the default of all eight; every `protected_owners` key is in `protected_hosts` and every owner is an app id; the six Meta names are owned by `facebook_instagram` and the three WhatsApp names by `whatsapp`; the Kakao and Viber ranges are public, at most /8 wide, and overlap neither the shared-CDN list nor the notification ranges; the Facebook & Instagram list contains the gateway, realtime and Instagram API names.
-- **Library:** the owner filter (unowned always; owned only while the owner is not selected) and the migration's selection update (non-empty gains the new ids once, empty stays empty, order and duplicates handled).
+- **Library:** the owner filter (unowned always; owned only while the owner is not selected), the in-turns lookup order, and the migration's selection update (non-empty gains the new ids once, empty stays empty, order and duplicates handled).
 - **VM script:** status lists eight apps by default; the migration adds the new ids to a saved selection.
-- **Device checklist:** Viber, KakaoTalk, Facebook, Instagram (feed and messages), Messenger and Threads blocked while their entry is selected; WhatsApp unaffected while only Facebook & Instagram is selected; Facebook and Instagram unaffected while only WhatsApp is selected.
+- **Device checklist:** Viber, KakaoTalk, Facebook, Instagram (feed and messages), Messenger and Threads blocked while their entry is selected; WhatsApp unaffected while only Facebook & Instagram is selected; Facebook, Instagram and Messenger (including a first-time Messenger sign-in) unaffected while only WhatsApp is selected.
 
 ## Known limits (new)
 
 - Viber's proxy setting bypasses the block; Viber calls may still connect.
 - KakaoTalk takes other Kakao services with it; Facebook & Instagram takes Threads, Meta AI, meta.com, "Log in with Facebook" and Quest sign-in with it, on blocked devices only.
 - Viber's and KakaoTalk's ranges are fixed at release time.
+- Messenger's one-time end-to-end-encryption setup may use `v.whatsapp.net`, which is on WhatsApp's list (from public client code, not verified on a device). With only WhatsApp selected, that setup may fail on a blocked device. Nothing changes in what is blocked (builder's call); the device checklist checks it.
 
 ## Left to the builder
 
