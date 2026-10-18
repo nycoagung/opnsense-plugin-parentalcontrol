@@ -154,7 +154,8 @@
                 }
                 $("#status-cron").html(warn.length
                     ? ' &middot; <span class="text-danger">' + warn.join(' &middot; ') + '</span>' : '');
-                // refreshed_at is null whenever messaging is not in use
+                // refreshed_at is null both out of use and before the first
+                // refresh, so in_use decides which wording applies
                 var m = data.messaging || {};
                 var errs = m.errors || [];
                 var problems = errs.slice(0, 3).map(esc);
@@ -164,10 +165,12 @@
                 if (m.error) {
                     problems.unshift('<span class="text-danger">' + esc(m.error) + '</span>');
                 }
-                $("#status-messaging").html(' &middot; ' + (m.refreshed_at
+                $("#status-messaging").html(' &middot; ' + (m.in_use
                     ? "{{ lang._('Messaging: %s server entries') }}".replace('%s', esc(m.entries)) + ' &middot; ' +
-                      "{{ lang._('refreshed %s') }}".replace('%s', esc(new Date(m.refreshed_at * 1000)
-                          .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
+                      (m.refreshed_at
+                          ? "{{ lang._('refreshed %s') }}".replace('%s', esc(new Date(m.refreshed_at * 1000)
+                              .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
+                          : "{{ lang._('not refreshed yet') }}")
                     : "{{ lang._('Messaging: not in use') }}") +
                     (problems.length ? ' &middot; ' + problems.join(' &middot; ') : ''));
             });

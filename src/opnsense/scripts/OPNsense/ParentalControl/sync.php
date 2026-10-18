@@ -516,6 +516,8 @@ if ($mode === 'status') {
             'refreshed_at' => $msgInUse ? $cache['refreshed_at'] : null,
             'apps' => $msgApps,
             'errors' => $msgInUse ? $cache['errors'] : [],
+            /* refreshed_at is null both out of use and before the first refresh */
+            'in_use' => $msgInUse,
         ],
     ]);
     exit(0);
