@@ -1,0 +1,61 @@
+{
+  "apps": {
+    "line": {
+      "label": "LINE",
+      "hosts": ["legy.line-apps.com", "gd2.line.naver.jp", "line.me"],
+      "ranges_url": null
+    },
+    "signal": {
+      "label": "Signal",
+      "hosts": ["chat.signal.org", "sfu.voip.signal.org"],
+      "ranges_url": null
+    },
+    "snapchat": {
+      "label": "Snapchat",
+      "hosts": ["app.snapchat.com", "aws.api.snapchat.com", "gcp.api.snapchat.com", "snapchat.com"],
+      "ranges_url": null
+    },
+    "telegram": {
+      "label": "Telegram",
+      "hosts": ["telegram.org", "web.telegram.org", "t.me"],
+      "ranges_url": "https://core.telegram.org/resources/cidr.txt"
+    },
+    "whatsapp": {
+      "label": "WhatsApp",
+      "hosts": [
+        "g.whatsapp.net", "mmg.whatsapp.net", "pps.whatsapp.net", "static.whatsapp.net",
+        "v.whatsapp.net", "web.whatsapp.com", "whatsapp.com", "whatsapp.net", "wa.me"
+      ],
+      "ranges_url": null
+    }
+  },
+  "protected_hosts": [
+    "facebook.com", "www.facebook.com", "graph.facebook.com", "edge-mqtt.facebook.com",
+    "www.instagram.com", "i.instagram.com",
+    "www.apple.com", "www.icloud.com", "gateway.icloud.com", "setup.icloud.com",
+    "www.google.com", "www.youtube.com", "www.googleapis.com", "play.googleapis.com",
+    "android.clients.google.com", "classroom.google.com", "connectivitycheck.gstatic.com",
+    "www.microsoft.com", "login.live.com", "login.microsoftonline.com", "outlook.office365.com",
+    "teams.microsoft.com"
+  ],
+  "notifications": {
+    "apple_ranges": ["17.249.0.0/16", "17.252.0.0/16", "17.57.144.0/22", "17.188.128.0/18", "17.188.20.0/23"],
+    "google_hosts": [
+      "mtalk.google.com", "mtalk4.google.com",
+      "alt1-mtalk.google.com", "alt2-mtalk.google.com", "alt3-mtalk.google.com", "alt4-mtalk.google.com",
+      "alt5-mtalk.google.com", "alt6-mtalk.google.com", "alt7-mtalk.google.com", "alt8-mtalk.google.com"
+    ],
+    "google_ports": "5228-5230",
+    "microsoft_hosts": [],
+    "microsoft_ranges_url": "https://download.microsoft.com/download/94dd9a8e-7790-4bd5-a9d2-7e108c23335c/WNSPublicIPs_20251022.xml"
+  },
+  "shared_cdn_sources": {
+    "akamai": [
+      "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS20940",
+      "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS16625"
+    ],
+    "cloudflare": "https://www.cloudflare.com/ips-v4",
+    "cloudfront": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+    "fastly": "https://api.fastly.com/public-ip-list"
+  }
+}

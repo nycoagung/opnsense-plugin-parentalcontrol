@@ -36,8 +36,8 @@ P=src/opnsense
 
 [ -d "$MVC" ] || { echo "not an OPNsense system: $MVC missing" >&2; exit 1; }
 
-# The lib files are listed before sync.php and uninstall.php, which require them:
-# files are moved into place in list order.
+# The lib files, and messaging.json, which sync.php reads, are listed before the
+# scripts that need them: files are moved into place in list order.
 FILES="
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalControl.xml
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
@@ -51,6 +51,7 @@ $P/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/gener
 $P/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
 $P/scripts/OPNsense/ParentalControl/lib/markers.php|$SCRIPTS/lib/markers.php
 $P/scripts/OPNsense/ParentalControl/lib/messaging.php|$SCRIPTS/lib/messaging.php
+$P/scripts/OPNsense/ParentalControl/messaging.json|$SCRIPTS/messaging.json
 $P/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
 $P/scripts/OPNsense/ParentalControl/uninstall.php|$SCRIPTS/uninstall.php
 $P/scripts/OPNsense/ParentalControl/uninstall.sh|$SCRIPTS/uninstall.sh
