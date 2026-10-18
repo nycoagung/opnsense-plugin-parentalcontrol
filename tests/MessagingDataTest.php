@@ -74,6 +74,14 @@ check('data: excluded names absent',
         $appHosts)),
     []);
 
+/* WhatsApp's fallback chat servers: the names rotate between its two AWS Global
+   Accelerators, so any one left out lets the app reach whichever it points at */
+check('whatsapp: edge names e1-e16 are listed',
+    array_values(array_diff(
+        array_map(fn(int $i): string => "e$i.whatsapp.net", range(1, 16)),
+        $apps['whatsapp']['hosts'] ?? [])),
+    []);
+
 /* Apple support article 102266 */
 $apple = $notes['apple_ranges'] ?? [];
 sort($apple, SORT_STRING);
