@@ -378,6 +378,40 @@ check('hosts: the notification names, then the apps\' names, each once',
 check('hosts: with no app selected the notification names are still looked up',
     messagingHosts([], $notify),
     ['z.example', 'g.example', 'm.example']);
+/* each app's first name comes before any app's second, so a slow resolver thins
+   every app a little instead of skipping the names of whichever app comes last */
+check('hosts: apps take turns',
+    messagingHosts([['hosts' => ['a1.example', 'a2.example', 'a3.example']],
+                    ['hosts' => ['b1.example']],
+                    ['hosts' => ['c1.example', 'c2.example']]],
+        ['google_hosts' => ['n1.example'], 'microsoft_hosts' => ['n2.example']]),
+    ['n1.example', 'n2.example', 'a1.example', 'b1.example', 'c1.example', 'a2.example',
+     'c2.example', 'a3.example']);
+check('hosts: a name in two apps appears once, at its first turn',
+    messagingHosts([['hosts' => ['s.example', 'a2.example']], ['hosts' => ['b1.example', 's.example']]],
+        ['google_hosts' => [], 'microsoft_hosts' => []]),
+    ['s.example', 'b1.example', 'a2.example']);
+
+/* ---- protectedNames -------------------------------------------------------- */
+
+check('owners: an unowned name is always protected',
+    protectedNames(['a.example'], [], ['x']),
+    ['a.example']);
+check('owners: an owned name is protected while its owner is not selected',
+    protectedNames(['a.example', 'b.example'], ['b.example' => 'x'], ['y']),
+    ['a.example', 'b.example']);
+check('owners: an owned name is not protected while its owner is selected',
+    protectedNames(['a.example', 'b.example'], ['b.example' => 'x'], ['x', 'y']),
+    ['a.example']);
+/* only facebook_instagram selected: g.example is whatsapp's, so it stays protected,
+   and an address it resolves to is not learned even when another name returns it */
+$ownerNames = protectedNames(['g.example', 'f.example'],
+    ['g.example' => 'whatsapp', 'f.example' => 'facebook_instagram'], ['facebook_instagram']);
+check('owners: whatsapp protected while only facebook_instagram is selected',
+    [$ownerNames, updateLearned([], ['192.0.2.20', '203.0.113.30'],
+        protectedGuard($ownerNames, ['g.example' => ['192.0.2.20']], [], $now, $maxAge),
+        [], $now, $maxAge)],
+    [['g.example'], ['203.0.113.30' => $now]]);
 
 /* ---- updateLearned --------------------------------------------------------- */
 

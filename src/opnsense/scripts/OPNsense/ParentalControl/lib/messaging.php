@@ -397,11 +397,13 @@ function answerAddresses(array $records): array
 
 /**
  * The names to resolve: the notification services' names, then the selected apps'
- * names, each once (where a name comes twice, the first place counts).
+ * names taking turns (each app's first name, then each app's second, and so on),
+ * each once (where a name comes twice, the first place counts).
  *
  * resolveAll() spends its time budget in this order, the same every run, so a slow
  * resolver skips the names at the end. The notification names come first because
- * denying messaging cuts notifications whichever apps are selected, even none.
+ * denying messaging cuts notifications whichever apps are selected, even none. The
+ * apps take turns so that one long list cannot push another app's names to the end.
  *
  * @param array<array{hosts: list<string>}> $apps the selected apps' entries in
  *        messaging.json
@@ -412,10 +414,32 @@ function answerAddresses(array $records): array
 function messagingHosts(array $apps, array $notifications): array
 {
     $hosts = array_merge($notifications['google_hosts'], $notifications['microsoft_hosts']);
-    foreach ($apps as $app) {
-        $hosts = array_merge($hosts, $app['hosts']);
+    $lists = array_values(array_map(fn(array $app): array => array_values($app['hosts']), $apps));
+    $turns = max(array_map('count', $lists) ?: [0]);
+    for ($i = 0; $i < $turns; $i++) {
+        foreach ($lists as $list) {
+            if (isset($list[$i])) {
+                $hosts[] = $list[$i];
+            }
+        }
     }
     return array_values(array_unique($hosts));
+}
+
+/**
+ * The protected names that count this run: a name with no owner always, and a name
+ * owned by an app only while that app is not selected, because a selected app's own
+ * servers are what it blocks.
+ *
+ * @param list<string>          $hosts    messaging.json's protected_hosts
+ * @param array<string, string> $owners   messaging.json's protected_owners: host => app id
+ * @param array<string>         $selected this run's selected app ids
+ * @return list<string> the hosts that count, in their order
+ */
+function protectedNames(array $hosts, array $owners, array $selected): array
+{
+    return array_values(array_filter($hosts,
+        fn(string $host): bool => !in_array($owners[$host] ?? null, $selected, true)));
 }
 
 /**

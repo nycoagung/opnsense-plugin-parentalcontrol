@@ -74,13 +74,14 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
     $selectedIds = array_keys($selected);
     sort($selectedIds);
 
+    $protected = protectedNames($data['protected_hosts'], $data['protected_owners'] ?? [], $selectedIds);
     $found = resolveAll(messagingHosts($selected, $data['notifications']), $lookup, 20000, $nowMs);
-    $answered = resolveAll($data['protected_hosts'], $lookup, 10000, $nowMs);
+    $answered = resolveAll($protected, $lookup, 10000, $nowMs);
     $now = time();
     /* stamped with the hour, so the learned and protected sections change only when an
        answer does; the file itself is rewritten on every refresh, for its refresh time */
     $hour = intdiv($now, 3600) * 3600;
-    $guard = protectedGuard($data['protected_hosts'], $answered['answers'], $cache['protected'], $hour, 7 * 86400);
+    $guard = protectedGuard($protected, $answered['answers'], $cache['protected'], $hour, 7 * 86400);
     $learned = updateLearned(
         learnedForSelection($cache['learned'], $cache['apps'], $selectedIds),
         $found['addresses'],
