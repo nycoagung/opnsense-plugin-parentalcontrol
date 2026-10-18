@@ -46,6 +46,12 @@ require_once(__DIR__ . '/lib/messaging.php');
 /* the messaging aliases' fixed names, each with the marker that makes it ours */
 const MSG_ALIASES = [MSG_DEVICES_ALIAS => MARK_MSG_DEVICES, MSG_SERVERS_ALIAS => MARK_MSG_SERVERS];
 
+/* the messaging rules' markers, each with [protocol, destination, destination port] */
+const MSG_RULES = [
+    MARK_MSG_RULE => ['any', MSG_SERVERS_ALIAS, ''],
+    MARK_NOTIFY_RULE => ['TCP', 'any', NOTIFY_PORTS],
+];
+
 $mode = isset($argv[1]) ? $argv[1] : 'sync';
 
 /* One sync at a time: DNS lookups make a run's length depend on the network,
@@ -488,9 +494,48 @@ function messagingConflict(Alias $aliasMdl): ?string
     ));
 }
 
+/** Does an item of $items have a description starting with $marker? */
+function hasMarker(BaseField $items, string $marker): bool
+{
+    foreach ($items->iterateItems() as $item) {
+        if (strpos($item->description->getValue(), $marker) === 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Which messaging aliases and rules are not in the configuration, or null when
+ * all of them are. Only reads.
+ */
+function missingMessagingObjects(Alias $aliasMdl, Filter $filterMdl): ?string
+{
+    $missing = [];
+    foreach (MSG_ALIASES as $marker) {
+        if (!hasMarker($aliasMdl->aliases->alias, $marker)) {
+            $missing[] = $marker;
+        }
+    }
+    foreach (array_keys(MSG_RULES) as $marker) {
+        if (!hasMarker($filterMdl->rules->rule, $marker)) {
+            $missing[] = $marker;
+        }
+    }
+    return $missing === [] ? null : 'messaging objects missing: ' . implode(', ', $missing);
+}
+
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
-    $msgError = messagingConflict(new Alias());
+    $aliasMdl = new Alias();
+    $msgConflict = messagingConflict($aliasMdl);
+    /* While in use the objects must exist, or a device shown as denied messaging
+       has nothing enforcing it. Out of use their absence is normal. A conflict
+       says more, so it wins. */
+    $msgError = $msgConflict;
+    if ($msgError === null && $msgInUse) {
+        $msgError = missingMessagingObjects($aliasMdl, new Filter());
+    }
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -504,7 +549,7 @@ if ($mode === 'status') {
             'devices_table' => MSG_DEVICES_ALIAS,
             'servers_table' => MSG_SERVERS_ALIAS,
             /* under a conflict that table belongs to someone else's alias */
-            'entries' => $msgError === null ? count(tableContents($backend, MSG_SERVERS_ALIAS)) : 0,
+            'entries' => $msgConflict === null ? count(tableContents($backend, MSG_SERVERS_ALIAS)) : 0,
             'learned' => 0,
             'refreshed_at' => null,
             'apps' => array_values(array_filter(explode(',', $mdl->general->messaging_apps->getValue()))),
@@ -637,17 +682,6 @@ if ($ruleNode === null || $ruleChanged) {
 
 /* ---- make sure the messaging aliases and rules exist --------------------- */
 
-/** Does an item of $items have a description starting with $marker? */
-function hasMarker(BaseField $items, string $marker): bool
-{
-    foreach ($items->iterateItems() as $item) {
-        if (strpos($item->description->getValue(), $marker) === 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /**
  * Validate and save a model. On failure print why, as the script's other
  * validation messages are printed, and save nothing.
@@ -709,13 +743,9 @@ function ensureMessagingObjects(bool &$cfgChanged): ?string
         (new NetworkAliasField())->resetStaticOptions();
     }
 
-    /* the rules: [protocol, destination, destination port] */
     $filterMdl = new Filter();
     $ruleAdded = false;
-    foreach ([
-        MARK_MSG_RULE => ['any', MSG_SERVERS_ALIAS, ''],
-        MARK_NOTIFY_RULE => ['TCP', 'any', NOTIFY_PORTS],
-    ] as $marker => [$protocol, $destination, $port]) {
+    foreach (MSG_RULES as $marker => [$protocol, $destination, $port]) {
         if (!hasMarker($filterMdl->rules->rule, $marker)) {
             $rule = $filterMdl->rules->rule->Add();
             $rule->enabled = '1';
