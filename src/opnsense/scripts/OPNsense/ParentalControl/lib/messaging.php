@@ -110,13 +110,16 @@ function isPublicIpv4(string $s): bool
 }
 
 /**
- * A device target as pf stores it: an IPv4 CIDR with host bits set becomes its
- * network, so 192.0.2.10/24 is 192.0.2.0/24. Anything else comes back as it is: an
- * address, a CIDR already in network form, a /32, and whatever is not an IPv4 CIDR.
+ * A device target or table entry as pfctl lists it: an IPv4 CIDR with host bits set
+ * becomes its network, so 192.0.2.10/24 is 192.0.2.0/24, and a /32 becomes the bare
+ * address, since pfctl prints a prefix only when it is shorter than a host's.
+ * Anything else comes back as it is: an address, a CIDR already in network form, and
+ * whatever is not an IPv4 CIDR.
  *
- * The device field accepts host bits, but pf keeps the network form, so the table
- * diff would never settle on the typed one, and core's state filter rejects host
- * bits, so the drops would find nothing.
+ * The device field accepts host bits and /32, but pf keeps the network form and
+ * lists a host bare, so the table diff would never settle on the typed one; core's
+ * state filter rejects host bits, so the drops would find nothing; and the internet
+ * switch's state kill takes only a host.
  */
 function canonicalTarget(string $target): string
 {
@@ -125,23 +128,13 @@ function canonicalTarget(string $target): string
     }
     [$net, $bits] = explode('/', $target);
     $mask = (~0 << (32 - (int)$bits)) & 0xFFFFFFFF;
-    return long2ip(ip2long($net) & $mask) . '/' . (int)$bits;
-}
-
-/**
- * A pf table entry as pfctl lists it: a network in its network form
- * (canonicalTarget()), and a /32 as the bare address, since pfctl prints a prefix
- * only when it is shorter than a host's.
- */
-function pfTableEntry(string $entry): string
-{
-    $entry = canonicalTarget($entry);
-    return str_ends_with($entry, '/32') ? substr($entry, 0, -3) : $entry;
+    $net = long2ip(ip2long($net) & $mask);
+    return (int)$bits === 32 ? $net : $net . '/' . (int)$bits;
 }
 
 /**
  * What to add to and delete from a pf table so that it holds $want, matching each
- * entry the way pf lists it (pfTableEntry()). Compared as written, a wanted /32,
+ * entry the way pf lists it (canonicalTarget()). Compared as written, a wanted /32,
  * such as a notification service's address, never matches its bare listing, so it
  * would be deleted on one run and added back on the next.
  *
@@ -153,9 +146,9 @@ function pfTableEntry(string $entry): string
 function tableDiff(array $want, array $current): array
 {
     $listed = array_flip($current);
-    $wanted = array_flip(array_map('pfTableEntry', $want));
+    $wanted = array_flip(array_map('canonicalTarget', $want));
     return [
-        'added' => array_values(array_filter($want, fn(string $w): bool => !isset($listed[pfTableEntry($w)]))),
+        'added' => array_values(array_filter($want, fn(string $w): bool => !isset($listed[canonicalTarget($w)]))),
         'removed' => array_values(array_filter($current, fn(string $c): bool => !isset($wanted[$c]))),
     ];
 }

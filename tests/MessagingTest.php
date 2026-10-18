@@ -139,20 +139,20 @@ check('target: host bits give the network',
     [canonicalTarget('192.0.2.10/24'), canonicalTarget('198.51.100.130/25'), canonicalTarget('203.0.113.7/0'),
      canonicalTarget('192.0.2.10/024')],
     ['192.0.2.0/24', '198.51.100.128/25', '0.0.0.0/0', '192.0.2.0/24']);
-check('target: an address, a network and a /32 stay as they are',
-    [canonicalTarget('192.0.2.10'), canonicalTarget('192.0.2.0/24'), canonicalTarget('192.0.2.10/32')],
-    ['192.0.2.10', '192.0.2.0/24', '192.0.2.10/32']);
+/* pfctl lists a /32 as the bare address, and the internet switch's kill takes a host */
+check('target: a /32 is the bare address',
+    [canonicalTarget('192.0.2.10/32'), canonicalTarget('198.51.100.7/032')],
+    ['192.0.2.10', '198.51.100.7']);
+check('target: an address and a network stay as they are',
+    [canonicalTarget('192.0.2.10'), canonicalTarget('192.0.2.0/24')],
+    ['192.0.2.10', '192.0.2.0/24']);
 check('target: anything else stays as it is',
     [canonicalTarget('00:00:5e:00:53:01'), canonicalTarget('2001:db8::1/64'), canonicalTarget('192.0.2.10/33'),
      canonicalTarget('')],
     ['00:00:5e:00:53:01', '2001:db8::1/64', '192.0.2.10/33', '']);
 
-/* ---- pfTableEntry, tableDiff ----------------------------------------------- */
+/* ---- tableDiff ------------------------------------------------------------- */
 
-/* pfctl stores a network in network form and lists a /32 as a bare address */
-check('pf entry: as pfctl lists it',
-    array_map('pfTableEntry', ['198.51.100.7/32', '192.0.2.10/24', '192.0.2.0/24', '192.0.2.1', 'x']),
-    ['198.51.100.7', '192.0.2.0/24', '192.0.2.0/24', '192.0.2.1', 'x']);
 /* a /32 or a host-bit entry that pf already holds is neither added nor deleted
    again, which would take it out of the table on every other run */
 check('table: entries pf already holds in its own form stay',
