@@ -45,6 +45,7 @@ $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalContro
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
 $P/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$M/Menu/Menu.xml
 $P/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$M/ACL/ACL.xml
+$P/mvc/app/models/OPNsense/ParentalControl/Migrations/M1_2_0.php|$M/Migrations/M1_2_0.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$C/IndexController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$C/Api/SettingsController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$C/Api/ServiceController.php
