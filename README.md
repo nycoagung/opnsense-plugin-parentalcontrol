@@ -665,15 +665,35 @@ and the other devices kept working. That run found that OPNsense turns PHP's URL
 downloads off (`allow_url_fopen`), so Telegram's ranges could not be downloaded;
 downloads now use PHP's curl extension, which OPNsense core depends on.
 
+0.2.0 was installed on the same firewall from its branch, as an upgrade from 0.1.0:
+the settings migration turned the saved five apps into all eight. With the same
+phone:
+
+- the Settings tab has no Save button, a change brings up the reminder to apply,
+  and an invalid alias name stops Apply and brings up the tab with the field
+  marked;
+- with all eight apps selected, the phone's messaging apps failed, calls included,
+  no notification arrived, and web browsing, YouTube and Google Play kept working.
+  The servers table held about 4,900 entries, each change loaded with one pfctl
+  call, and every sync answered OK within seconds;
+- with only WhatsApp selected, WhatsApp failed, messages and calls, also five
+  minutes later;
+- with only Facebook & Instagram selected, Facebook, Instagram and Messenger
+  failed and WhatsApp worked.
+
+That run found the two gaps fixed before this release: WhatsApp moving to its
+fallback chat name, and Meta's DNS sending the app to a server at a site on another
+continent, which led to blocking every Meta site.
+
 **Still to come:** the run of `tests/vm/uninstall-test.sh` on a disposable OPNsense
 26.7 virtual machine (it saves `config.xml`, installs, exercises all three
-settings, checks that every app is selected by default and that the migration adds
-the new apps to a saved selection, uninstalls with and without `--purge`, and
-compares `config.xml` with the saved copy); the rest of the device checklist for
-0.1.0 (back to Not blocked, the schedule, choosing apps, a reboot, the status page
-and the uninstall rehearsal); and the whole checklist for 0.2.0, including Viber,
-KakaoTalk, Facebook & Instagram and the two sections with a single app selected.
-Their results are added here when they exist.
+settings, checks that every app is selected by default, that the migration adds
+the new apps to a saved selection and that the per-site servers reach the servers
+table, uninstalls with and without `--purge`, and compares `config.xml` with the
+saved copy); and the rest of the device checklist: back to Not blocked, the
+schedule, an empty app selection, Messenger's first sign-in with only WhatsApp
+selected, a reboot, the status page, the uninstall rehearsal, and the apps the test
+phone does not have. Their results are added here when they exist.
 
 **Not implemented:** IPv6 blocking — see Requirements below.
 
