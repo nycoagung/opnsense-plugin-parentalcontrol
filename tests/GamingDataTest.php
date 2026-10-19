@@ -78,10 +78,10 @@ check('data: the safe-list is the design\'s', $safe,
     [[53, 53], [123, 123], [443, 443], [500, 500], [3478, 3497], [4500, 4500], [8801, 8810], [10000, 10000],
      [16384, 16387], [16393, 16402], [19302, 19309]]);
 check('data: the TCP game ports are the design\'s', $tcp,
-    [[1119, 1120], [2099, 2099], [2567, 2567], [3724, 3724], [4530, 4533], [6112, 6119], [6695, 6709],
+    [[1119, 1120], [2099, 2099], [2567, 2567], [3724, 3724], [4530, 4533], [5736, 5736], [6112, 6119], [6695, 6709],
      [7348, 7351], [7500, 7509], [7770, 7770], [7777, 7777], [7800, 7802], [7850, 7854], [8393, 8400],
      [9090, 9093], [9339, 9339], [19090, 19093], [19132, 19133], [20500, 20500], [20510, 20510],
-     [25565, 25565], [27777, 27777], [28960, 28960], [30000, 30009], [37000, 37100], [50010, 50014],
+     [25565, 25565], [27777, 27777], [28960, 28960], [30000, 35000], [37000, 37100], [50010, 50014],
      [65010, 65010], [65050, 65050]]);
 check('data: port lists are ordered, disjoint and within 1-65535',
     [badRanges($safe), badRanges($tcp)], [[], []]);
@@ -122,6 +122,19 @@ check('data: the game hosts are the design\'s',
             'x3tw-gatesvr.infoldgames.com', 'x3asia-loginsvr.infoldgames.com', 'x3en-loginsvr.infoldgames.com',
             'x3us-loginsvr.infoldgames.com', 'x3tw-loginsvr.infoldgames.com',
         ], 'ranges' => []],
+        'last_war' => ['hosts' => [
+            'lastwar-game-tcp-aws-1.lastwargame.com', 'lastwar-game-tcp-gcp-1.lastwargame.com',
+            'lastwar-game-us-aws-ali.lastwargame.com',
+        ], 'ranges' => []],
+        'monopoly_go' => ['hosts' => ['fenrir-resolver-tophat.aprod.scopely.io'], 'ranges' => []],
+        'gossip_harbor' => ['hosts' => [
+            'diary.cliapi-ga.mergesigma.com', 'diary.cliapi-udp.mergesigma.com', 'sso.cliapi-ga.mergesigma.com',
+        ], 'ranges' => []],
+        'heart_of_vegas' => ['hosts' => [
+            'heartofvegas.prd-01.vortex.hov.madness.games', 'liveops.prd-01.vortex.hov.madness.games',
+        ], 'ranges' => []],
+        'lightning_link' => ['hosts' => ['lightninglink.prd-01.vortex.lnl.madness.games'], 'ranges' => []],
+        'cashman_casino' => ['hosts' => ['cashman.prd-01.vortex.csm.madness.games'], 'ranges' => []],
         'vivox' => ['hosts' => [], 'ranges' => ['85.236.96.0/21', '85.236.104.0/23']],
     ]);
 $hosts = array_merge(...array_values(array_map(fn(array $s): array => $s['hosts'] ?? [], $servers ?: [[]])));
@@ -147,7 +160,20 @@ check('data: no server range overlaps a shared CDN range',
     [count($cdn) > 100, array_values(array_filter($ranges, fn(string $r): bool => array_filter($cdn,
         fn(string $c): bool => ipv4InCidr(explode('/', $r)[0], $c) || ipv4InCidr(explode('/', $c)[0], $r)) !== []))],
     [true, []]);
-check('data: alias suffixes are [\'.elb.amazonaws.com\']', $data['alias_suffixes'] ?? null, ['.elb.amazonaws.com']);
+check('data: alias suffixes are AWS load balancers and Global Accelerator', $data['alias_suffixes'] ?? null,
+    ['.elb.amazonaws.com', '.awsglobalaccelerator.com']);
+/* A proxy host is reached through a provider's proxy that gives that one name an address
+   of its own (Cloudflare Spectrum): its answers skip the alias and shared-CDN rules, so
+   the list is kept to the names a test proved necessary. */
+$proxies = array_filter(array_map(fn(array $s): array => $s['proxy_hosts'] ?? [], $servers ?: []));
+check('data: the proxy hosts are the design\'s', $proxies,
+    ['last_war' => ['lastwar-game-tcp-cf-1.lastwarapp.net']]);
+$proxyList = array_merge(...array_values($proxies ?: [[]]));
+check('data: every proxy host is a lower-case DNS name, listed once, and not also a plain host',
+    [array_values(array_filter($proxyList, fn(string $h): bool =>
+        !preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $h))),
+     count($proxyList) === count(array_unique($proxyList)), array_values(array_intersect($proxyList, $hosts))],
+    [[], true, []]);
 
 /* ---- the settings model ---------------------------------------------------- */
 

@@ -281,11 +281,13 @@ ordinary apps use TCP, or QUIC on port 443. A device denied gaming:
   lobbies and chat: Supercell's games (9339), Minecraft Java servers (25565) and
   Bedrock server joins (19132–19133), Photon and Unity Relay fallbacks, Call of
   Duty, Battle.net, Riot's client, Warframe, World of Tanks, War Thunder, Destiny 2,
+  Whiteout Survival and Kingshot (30101, 31601), eFootball (30000–35000, 5736),
   and the default ports of common game-server software;
 - cannot reach the servers of a few games listed by name, whatever traffic they
   use: Pokémon GO, Monster Hunter Now, Honkai Impact 3rd, Infinity Nikki, Love and
-  Deepspace, and in-game voice chat (Vivox), nor Niantic's sign-in, which stops
-  every Niantic game, listed or not.
+  Deepspace, Last War: Survival, MONOPOLY GO!, Gossip Harbor, the Heart of Vegas,
+  Lightning Link and Cashman casino games, and in-game voice chat (Vivox), nor
+  Niantic's sign-in, which stops every Niantic game, listed or not.
 
 | UDP ports a device denied gaming may still use | For |
 |---|---|
@@ -309,8 +311,11 @@ messaging data ships them, so their calls keep working whatever port they pick.
 The games listed by name are looked up every minute through the firewall's own
 resolver, like the messaging apps, and their addresses are kept for 7 days. An
 answer counts only when it is public and the name's own: a plain record, or one of
-the game's own Amazon load balancers. An answer through any other alias, such as a
-CDN that other sites share, is left alone.
+the game's own Amazon load balancers or Global Accelerators. An answer through any
+other alias, such as a CDN that other sites share, is left alone. One name is the
+exception: Last War's Cloudflare game gateway, which Cloudflare's game proxy gives an
+address of its own, and without which Last War keeps playing. Such a proxy name only
+has to answer with a public address, and is kept by name for 7 days.
 
 Everything else on the device keeps working: web and video, app stores and game
 downloads, notifications, chat and calls in the messaging apps, FaceTime, Zoom,
@@ -697,9 +702,9 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
 | `tests/MessagingTest.php` | 173 | the messaging decision, the IPv4 helpers, the one check every range passes before a table, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/GamingTest.php` | 46 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
-| `tests/GamingDataTest.php` | 15 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, every range public and clear of the shared CDNs, and the settings model's Gaming field and alias-name rule |
-| `tests/CheckGamingHostsTest.py` | 14 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer; and that a passive-DNS lookup answered with an error or the daily-quota message fails the check instead of passing it, while a provider's generic name for the address itself is not taken for another site |
+| `tests/GamingTest.php` | 50 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the plain and proxy game hosts, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
+| `tests/GamingDataTest.php` | 17 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts and the one proxy host, every range public and clear of the shared CDNs, and the settings model's Gaming field and alias-name rule |
+| `tests/CheckGamingHostsTest.py` | 16 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer; and that a passive-DNS lookup answered with an error or the daily-quota message fails the check instead of passing it, while a provider's generic name for the address itself is not taken for another site; and that a proxy host only has to answer with a public address |
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
 | `tests/FirewallTest.php` | 10 | loading a pf table: entries checked and put in pf's own form first, one pfctl call for the additions and one for the deletions, a failed call reported, and configd for each address only for a small change |

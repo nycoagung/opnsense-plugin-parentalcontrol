@@ -5,10 +5,10 @@
     [16384, 16387], [16393, 16402], [19302, 19309]
   ],
   "tcp_ports": [
-    [1119, 1120], [2099, 2099], [2567, 2567], [3724, 3724], [4530, 4533], [6112, 6119], [6695, 6709],
+    [1119, 1120], [2099, 2099], [2567, 2567], [3724, 3724], [4530, 4533], [5736, 5736], [6112, 6119], [6695, 6709],
     [7348, 7351], [7500, 7509], [7770, 7770], [7777, 7777], [7800, 7802], [7850, 7854], [8393, 8400],
     [9090, 9093], [9339, 9339], [19090, 19093], [19132, 19133], [20500, 20500], [20510, 20510], [25565, 25565],
-    [27777, 27777], [28960, 28960], [30000, 30009], [37000, 37100], [50010, 50014], [65010, 65010],
+    [27777, 27777], [28960, 28960], [30000, 35000], [37000, 37100], [50010, 50014], [65010, 65010],
     [65050, 65050]
   ],
   "servers": {
@@ -48,6 +48,32 @@
         "x3us-loginsvr.infoldgames.com", "x3tw-loginsvr.infoldgames.com"
       ]
     },
+    "last_war": {
+      "label": "Last War: Survival",
+      "hosts": ["lastwar-game-tcp-aws-1.lastwargame.com", "lastwar-game-tcp-gcp-1.lastwargame.com",
+                "lastwar-game-us-aws-ali.lastwargame.com"],
+      "proxy_hosts": ["lastwar-game-tcp-cf-1.lastwarapp.net"]
+    },
+    "monopoly_go": {
+      "label": "MONOPOLY GO!",
+      "hosts": ["fenrir-resolver-tophat.aprod.scopely.io"]
+    },
+    "gossip_harbor": {
+      "label": "Gossip Harbor",
+      "hosts": ["diary.cliapi-ga.mergesigma.com", "diary.cliapi-udp.mergesigma.com", "sso.cliapi-ga.mergesigma.com"]
+    },
+    "heart_of_vegas": {
+      "label": "Heart of Vegas",
+      "hosts": ["heartofvegas.prd-01.vortex.hov.madness.games", "liveops.prd-01.vortex.hov.madness.games"]
+    },
+    "lightning_link": {
+      "label": "Lightning Link Casino",
+      "hosts": ["lightninglink.prd-01.vortex.lnl.madness.games"]
+    },
+    "cashman_casino": {
+      "label": "Cashman Casino",
+      "hosts": ["cashman.prd-01.vortex.csm.madness.games"]
+    },
     "vivox": {
       "label": "In-game voice chat (Vivox)",
       "ranges": ["85.236.96.0/21", "85.236.104.0/23"]
@@ -56,5 +82,5 @@
   "never_blocked": {
     "discord": ["66.22.192.0/18"]
   },
-  "alias_suffixes": [".elb.amazonaws.com"]
+  "alias_suffixes": [".elb.amazonaws.com", ".awsglobalaccelerator.com"]
 }

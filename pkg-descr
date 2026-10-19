@@ -35,14 +35,17 @@ Plugin Changelog
 * A device denied gaming cannot send UDP to the internet except on a short
   safe-list (name lookups, time, the web over QUIC, Wi-Fi Calling, call relays,
   FaceTime, Zoom, Meet, Signal), cannot use games' TCP ports, and cannot reach
-  Pokemon GO's, Monster Hunter Now's, Honkai Impact 3rd's, Infinity Nikki's and
-  Love and Deepspace's servers, Niantic's sign-in, which every Niantic game
-  uses, or Vivox's in-game voice chat
+  the servers of Pokemon GO, Monster Hunter Now, Honkai Impact 3rd, Infinity
+  Nikki, Love and Deepspace, Last War: Survival, MONOPOLY GO!, Gossip Harbor and
+  the Heart of Vegas, Lightning Link and Cashman casino games, Niantic's sign-in,
+  which every Niantic game uses, or Vivox's in-game voice chat. Whiteout
+  Survival, Kingshot and eFootball are blocked by their TCP ports
 * UDP to the local network, the firewall itself, Discord's own network and the
   messaging apps' own networks is never treated as gaming, so calls, a VPN back
   home and Discord voice keep working
 * A game host's address is learned only when it is the name's own and public; an
-  answer through a CDN is left alone
+  answer through a CDN is left alone, except Last War's Cloudflare game gateway,
+  which has an address of its own
 * No device is blocked from gaming until the never-blocked table holds the whole
   local network, nor while a gaming alias is renamed by hand or missing
 * The Status tab and the status JSON show gaming per device and in a summary line

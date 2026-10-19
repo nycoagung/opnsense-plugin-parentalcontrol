@@ -100,6 +100,9 @@ it is by default, a match in progress ends rather than carrying on.
 - [ ] Pokémon GO and Monster Hunter Now cannot connect (if installed).
 - [ ] Another Niantic game, such as Pikmin Bloom, Peridot or Ingress, stops at
       sign-in (if installed).
+- [ ] Each other game the device has from the plugin's lists cannot connect: Whiteout
+      Survival, Kingshot, eFootball, Last War, MONOPOLY GO!, Gossip Harbor, Heart of
+      Vegas, Lightning Link, Cashman Casino.
 - [ ] For each game, note what it shows: an error, a retry loop, a spinner.
 
 ## 5 Still working on the blocked device
