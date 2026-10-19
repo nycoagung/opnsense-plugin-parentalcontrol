@@ -160,8 +160,8 @@ check('whatsapp: the media fallback name is listed',
     in_array('mmg-fallback.whatsapp.net', $apps['whatsapp']['hosts'] ?? [], true),
     true);
 /* Meta's DNS hands a client a server at any of its sites, so the servers of every site
-   ship with the plugin: the ones the maintainer's device reached in Sydney, Atlanta and
-   Los Angeles among them */
+   ship with the plugin: the ones a test device reached at sites on two continents
+   among them */
 $sites = fn(string $app): array => $apps[$app]['site_ranges'] ?? [];
 check('whatsapp: its chat and media servers at Meta\'s sites ship with the plugin',
     [count($sites('whatsapp')) >= 100, array_map(fn(string $ip): bool => ipv4InAny($ip, $sites('whatsapp')),

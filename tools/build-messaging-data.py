@@ -31,7 +31,7 @@ tools/messaging-sources.json and adds the lists it downloads:
   announced prefixes from RIPEstat), merged;
 - the addresses of Meta's per-site servers for the apps with meta_site_hosts:
   each template with {site} replaced by every server-and-site suffix in
-  meta_sites (01-syd2), resolved through this machine's resolver, keeping the
+  meta_sites (01-ams2), resolved through this machine's resolver, keeping the
   answers inside meta_sites' owner AS (AS32934's announced prefixes, from
   RIPEstat) as site_ranges. Meta's DNS hands a client a server at one of its many
   sites, which a minute's lookup may never see, so every site's servers are
@@ -192,7 +192,7 @@ def extra_ranges(app_id, app):
 
 def site_hosts(app, sites):
     """An app's per-site server names: each meta_site_hosts template with {site}
-    replaced by every server-and-site suffix (01-syd2), template by template."""
+    replaced by every server-and-site suffix (01-ams2), template by template."""
     return [template.replace('{site}', site) for template in app.get('meta_site_hosts', []) for site in sites]
 
 

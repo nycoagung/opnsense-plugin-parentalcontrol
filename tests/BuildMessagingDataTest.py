@@ -158,12 +158,12 @@ check('ranges: an extra range with host bits set stops the build',
       error(gen.extra_ranges, 'example', {'extra_ranges': ['198.51.100.7/24']}),
       'example: extra range 198.51.100.7/24 is not a network address')
 # Meta's per-site server names: one template per service, {site} standing for each
-# server-and-site suffix (01-syd2); every answer must lie in the owner's networks
+# server-and-site suffix (01-ams2); every answer must lie in the owner's networks
 check('sites: each template is expanded for every server of every site',
-      gen.site_hosts({'meta_site_hosts': ['a-shv-{site}.example', 'b-shv-{site}.example']}, ['01-syd2', '02-lax3']),
-      ['a-shv-01-syd2.example', 'a-shv-02-lax3.example', 'b-shv-01-syd2.example', 'b-shv-02-lax3.example'])
+      gen.site_hosts({'meta_site_hosts': ['a-shv-{site}.example', 'b-shv-{site}.example']}, ['01-ams2', '02-fra3']),
+      ['a-shv-01-ams2.example', 'a-shv-02-fra3.example', 'b-shv-01-ams2.example', 'b-shv-02-fra3.example'])
 check('sites: an app without per-site names has none',
-      gen.site_hosts({'hosts': ['a.example']}, ['01-syd2']),
+      gen.site_hosts({'hosts': ['a.example']}, ['01-ams2']),
       [])
 site_answers = {'a.example': ['198.51.100.9', '198.51.100.7'], 'b.example': ['198.51.100.7'], 'c.example': [],
                 'd.example': ['203.0.113.9']}

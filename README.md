@@ -167,11 +167,11 @@ filter, depending on nothing outside OPNsense core:
   and the names not reached are reported.
 - **Meta's servers at every site.** Meta's DNS hands a device a WhatsApp,
   Facebook or Instagram server at whichever of its sites it picks at that moment,
-  Sydney one minute, Los Angeles or Atlanta the next, so a lookup once a minute
-  can miss the one a device was given. The plugin therefore ships the addresses
+  one nearby one minute and one on another continent the next, so a lookup once a
+  minute can miss the one a device was given. The plugin therefore ships the addresses
   of these apps' servers at every Meta site, about 870 for WhatsApp and 3,800 for
   Facebook & Instagram, built at release time from Meta's per-site server names
-  (such as `whatsapp-chatd-edge-shv-01-syd2.facebook.com`) and kept only where
+  (such as `whatsapp-chatd-edge-shv-01-ams2.facebook.com`) and kept only where
   they lie in Meta's own network (AS32934). They are blocked whenever the app is
   selected. The two lists share no address, so blocking one app leaves the other
   working.
@@ -183,13 +183,14 @@ filter, depending on nothing outside OPNsense core:
   own network blocked.
 - **Published ranges.** Telegram's are downloaded from core.telegram.org once a
   day, with an hour's wait after a failed download. The last good copy, then the
-  copy shipped with the plugin, stand in for a download that fails. A downloaded
-  range wider than a /8 is ignored, and so is one that reaches into private,
-  local, carrier-grade NAT or multicast address space: blocking that would cut a
-  device off its own network or the firewall. Telegram's apps also have an address
-  built in from a block that Telegram announces but leaves out of its list,
-  95.161.64.0/20; that block ships with the plugin and is blocked with whichever
-  list is used.
+  copy shipped with the plugin, stand in for a download that fails. Every range,
+  downloaded, kept from an earlier download or shipped, is checked before it can be
+  blocked: one wider than a /8 is left out, and so is one that reaches into
+  private, local, carrier-grade NAT or multicast address space, since blocking that
+  would cut a device off its own network or the firewall; Status lists what was
+  left out. Telegram's apps also have an address built in from a block registered
+  to Telegram and left out of its list, 95.161.64.0/20 (announced as two /21s);
+  that block ships with the plugin and is blocked with whichever list is used.
 - **Shipped ranges.** Viber's, KakaoTalk's and LINE's networks ship with the
   plugin and are not downloaded: the networks registered to Viber in ARIN's
   registry, the address blocks Kakao announces from its own networks (AS7625,
@@ -762,7 +763,7 @@ out. Then regenerate and read the diff: a range that grows a lot needs a look
 before it ships.
 
 **Before each release, refresh Meta's site list.** `meta_sites` in
-`tools/messaging-sources.json` lists the server-and-site suffixes (`01-syd2`) of
+`tools/messaging-sources.json` lists the server-and-site suffixes (`01-ams2`) of
 Meta's per-site server names, and each app's `meta_site_hosts` the name of each
 kind of server with `{site}` in place of the suffix. The list was taken on
 2026-10-19 from ProjectDiscovery's Chaos dataset for facebook.com: every
