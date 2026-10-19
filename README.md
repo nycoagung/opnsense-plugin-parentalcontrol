@@ -698,7 +698,7 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | `tests/MessagingTest.php` | 173 | the messaging decision, the IPv4 helpers, the one check every range passes before a table, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
 | `tests/GamingTest.php` | 46 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
 | `tests/GamingDataTest.php` | 15 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, every range public and clear of the shared CDNs, and the settings model's Gaming field and alias-name rule |
-| `tests/CheckGamingHostsTest.py` | 6 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer |
+| `tests/CheckGamingHostsTest.py` | 11 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer; and that a passive-DNS lookup answered with an error or the daily-quota message fails the check instead of passing it |
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
 | `tests/FirewallTest.php` | 10 | loading a pf table: entries checked and put in pf's own form first, one pfctl call for the additions and one for the deletions, a failed call reported, and configd for each address only for a small change |
@@ -945,8 +945,9 @@ be the game's own:
 resolves each host through Google's public DNS and fails one that answers through
 an alias other than the game's own load balancers, with an address in the shared
 CDN ranges or one no public server has, or not at all; `--passive-dns` also fails
-one whose addresses carry other sites' names (HackerTarget's free lookup allows a
-few dozen a day). A failing host comes out of the list, or the game is caught some
+one whose addresses carry other sites' names, or whose lookup gets no names back.
+HackerTarget's free lookup allows a few dozen a day; past that every lookup fails,
+and the check is run again the next day. A failing host comes out of the list, or the game is caught some
 other way, before the release.
 
 **Before each release, check for a newer Microsoft WNS file.** The generator pins

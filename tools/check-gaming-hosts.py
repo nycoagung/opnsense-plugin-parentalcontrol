@@ -10,8 +10,9 @@ balancer of the game's own). A host fails when it answers through any other alia
 public server has (FILTERED_ANSWERS, as the messaging data build uses), or not at
 all. --passive-dns also asks HackerTarget's reverse lookup which other names each
 address carries, and fails a host whose addresses also serve names outside the
-game's own domains. Answers come from Google's public DNS, so a local DNS filter
-cannot hide anything.
+game's own domains, and a host whose lookup gets no list of names back, such as
+once the day's free lookups are used up. Answers come from Google's public DNS, so
+a local DNS filter cannot hide anything.
 
 Prints one line per host, then its problems, and exits 1 when any host has one. The
 output shows the DNS of the moment: read it, never commit it.
@@ -77,12 +78,21 @@ def resolve(host):
             [r['data'] for r in records if r.get('type') == 1])
 
 
+NO_NAMES = 'no dns a records found'     # HackerTarget's answer for an address without names
+
+
 def other_names(ip):
-    """The names HackerTarget's passive DNS has seen on ip; [] when it has none or
-    answers with a message (its free tier allows a few dozen lookups a day)."""
+    """The names HackerTarget's passive DNS has seen on ip; [] when it answers that it
+    has none. Any other answer that is not names, such as its error or daily-quota
+    message (its free tier allows a few dozen lookups a day), raises ValueError: a
+    lookup that did not happen must not pass as one that found no other names."""
     text = fetch('https://api.hackertarget.com/reverseiplookup/?' + urllib.parse.urlencode({'q': ip}))
     names = [line.strip().lower() for line in text.splitlines() if line.strip()]
-    return [] if any(' ' in name for name in names) else names
+    if names == [NO_NAMES]:
+        return []
+    if not names or any(' ' in name for name in names):
+        raise ValueError(text.strip()[:120] or 'an empty answer')
+    return names
 
 
 def main(argv=None):
@@ -102,7 +112,12 @@ def main(argv=None):
             found = problems(host, chain, addresses, suffixes, cdn)
             if args.passive_dns:
                 for ip in addresses:
-                    strangers = [n for n in other_names(ip)
+                    try:
+                        seen = other_names(ip)
+                    except ValueError as e:
+                        found.append(f'passive DNS lookup of {ip} failed: {e}')
+                        continue
+                    strangers = [n for n in seen
                                  if not any(n == d or n.endswith('.' + d) for d in domains)
                                  and not n.endswith(tuple(suffixes))]
                     if strangers:
