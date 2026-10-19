@@ -147,5 +147,34 @@ check('data: no server range overlaps a shared CDN range',
     [true, []]);
 check('data: alias suffixes are [\'.elb.amazonaws.com\']', $data['alias_suffixes'] ?? null, ['.elb.amazonaws.com']);
 
+/* ---- the settings model ---------------------------------------------------- */
+
+$modelPath = __DIR__ . '/../src/opnsense/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml';
+$model = simplexml_load_file($modelPath);
+if ($model === false) {
+    fwrite(STDERR, "could not read $modelPath as XML\n");
+    exit(1);
+}
+/* XPath, so a field missing from the model comes back empty and is reported */
+$field = fn(string $path): string => (string)($model->xpath("/model/items/$path")[0] ?? '');
+$gamingOptions = [];
+foreach ($model->xpath('/model/items/devices/gaming/OptionValues/*') ?: [] as $option) {
+    $gamingOptions[$option->getName()] = (string)$option;
+}
+/* a device saved before Gaming existed has no value and takes the default, so every
+   existing device comes up as Not blocked; Required keeps the dialog from saving an
+   empty choice */
+check('model: Gaming offers off "Not blocked", on "Blocked", schedule "Blocked outside allowed hours", default off',
+    [$gamingOptions, $field('devices/gaming/Default'), $field('devices/gaming/Required')],
+    [['off' => 'Not blocked', 'on' => 'Blocked', 'schedule' => 'Blocked outside allowed hours'], 'off', 'Y']);
+/* the internet alias may not take a gaming alias's name: the two would collide on
+   every sync, and the internet block would stop */
+$mask = $field('general/alias_name/Mask');
+check('model: the internet alias name may not be any gaming alias name',
+    [array_map(fn(string $name): int => (int)@preg_match($mask, $name), array_keys(GAME_ALIASES)),
+     (int)@preg_match($mask, 'NoMessaging'), (int)@preg_match($mask, 'NoInternet'),
+     (int)@preg_match($mask, 'NoGamingAtNight')],
+    [[0, 0, 0, 0, 0], 0, 1, 1]);
+
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

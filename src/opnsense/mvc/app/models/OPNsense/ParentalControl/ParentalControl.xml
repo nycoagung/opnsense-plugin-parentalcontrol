@@ -1,6 +1,6 @@
 <model>
     <mount>//OPNsense/ParentalControl</mount>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
     <description>Per-device internet access control with schedules</description>
     <items>
         <general>
@@ -11,8 +11,8 @@
             <alias_name type="TextField">
                 <Default>NoInternet</Default>
                 <Required>Y</Required>
-                <Mask>/^(?!(NoMessaging|Messaging_Servers)$)[a-zA-Z0-9_]{1,25}$/</Mask>
-                <ValidationMessage>Letters, digits and underscore only, up to 25 characters, and not NoMessaging or Messaging_Servers, which messaging blocking uses. The companion alias appends &quot;_Local&quot; and pf table names cannot exceed 31.</ValidationMessage>
+                <Mask>/^(?!(NoMessaging|Messaging_Servers|NoGaming|Gaming_Servers|Gaming_Exempt|Gaming_UDP_Ports|Gaming_TCP_Ports)$)[a-zA-Z0-9_]{1,25}$/</Mask>
+                <ValidationMessage>Letters, digits and underscore only, up to 25 characters, and not NoMessaging, Messaging_Servers, NoGaming, Gaming_Servers, Gaming_Exempt, Gaming_UDP_Ports or Gaming_TCP_Ports, which messaging and gaming blocking use. The companion alias appends &quot;_Local&quot; and pf table names cannot exceed 31.</ValidationMessage>
             </alias_name>
             <kill_states type="BooleanField">
                 <Default>1</Default>
@@ -100,6 +100,15 @@
                     <schedule>Blocked outside allowed hours</schedule>
                 </OptionValues>
             </messaging>
+            <gaming type="OptionField">
+                <Required>Y</Required>
+                <Default>off</Default>
+                <OptionValues>
+                    <off>Not blocked</off>
+                    <on>Blocked</on>
+                    <schedule>Blocked outside allowed hours</schedule>
+                </OptionValues>
+            </gaming>
             <description type="TextField">
                 <Mask>/^[^&lt;&gt;&quot;'\\]{0,255}$/u</Mask>
                 <ValidationMessage>Up to 255 characters. Angle brackets, quotes and backslash are not allowed.</ValidationMessage>
