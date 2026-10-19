@@ -283,8 +283,9 @@ ordinary apps use TCP, or QUIC on port 443. A device denied gaming:
   Duty, Battle.net, Riot's client, Warframe, World of Tanks, War Thunder, Destiny 2,
   and the default ports of common game-server software;
 - cannot reach the servers of a few games listed by name, whatever traffic they
-  use: Pokémon GO, Honkai Impact 3rd, Infinity Nikki, Love and Deepspace, and
-  in-game voice chat (Vivox).
+  use: Pokémon GO, Monster Hunter Now, Honkai Impact 3rd, Infinity Nikki, Love and
+  Deepspace, and in-game voice chat (Vivox), nor Niantic's sign-in, which stops
+  every Niantic game, listed or not.
 
 | UDP ports a device denied gaming may still use | For |
 |---|---|

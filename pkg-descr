@@ -35,8 +35,9 @@ Plugin Changelog
 * A device denied gaming cannot send UDP to the internet except on a short
   safe-list (name lookups, time, the web over QUIC, Wi-Fi Calling, call relays,
   FaceTime, Zoom, Meet, Signal), cannot use games' TCP ports, and cannot reach
-  Pokemon GO's, Honkai Impact 3rd's, Infinity Nikki's and Love and Deepspace's
-  servers or Vivox's in-game voice chat
+  Pokemon GO's, Monster Hunter Now's, Honkai Impact 3rd's, Infinity Nikki's and
+  Love and Deepspace's servers, Niantic's sign-in, which every Niantic game
+  uses, or Vivox's in-game voice chat
 * UDP to the local network, the firewall itself, Discord's own network and the
   messaging apps' own networks is never treated as gaming, so calls, a VPN back
   home and Discord voice keep working

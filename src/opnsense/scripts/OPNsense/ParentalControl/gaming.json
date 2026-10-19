@@ -16,6 +16,14 @@
       "label": "Pokémon GO",
       "hosts": ["pgorelease.nianticlabs.com"]
     },
+    "monster_hunter_now": {
+      "label": "Monster Hunter Now",
+      "hosts": ["magellan-rel.nianticlabs.com"]
+    },
+    "niantic_sign_in": {
+      "label": "Niantic sign-in, used by every Niantic game",
+      "hosts": ["identity.nianticlabs.com"]
+    },
     "honkai_impact_3rd": {
       "label": "Honkai Impact 3rd",
       "hosts": [

@@ -20,7 +20,8 @@ Before starting:
 
 - **Have the games ready on the test device:** Clash of Clans or another Supercell
   game, which plays over its own TCP port; one real-time game that plays over UDP,
-  such as Brawl Stars, Roblox or Among Us; and Pokémon GO if it is installed. Open
+  such as Brawl Stars, Roblox or Among Us; and Pokémon GO and Monster Hunter Now if
+  they are installed. Open
   each once before the block, so that a failure later is the block's.
 - **Take the test device out of any DNS filtering** that blocks game names, such as
   a Pi-hole group with blocklists. The plugin learns the game servers' addresses
@@ -96,7 +97,9 @@ it is by default, a match in progress ends rather than carrying on.
 
 - [ ] The real-time game's match drops, and a new match cannot be joined.
 - [ ] Clash of Clans loses its connection to the village and cannot reconnect.
-- [ ] Pokémon GO cannot connect (if installed).
+- [ ] Pokémon GO and Monster Hunter Now cannot connect (if installed).
+- [ ] Another Niantic game, such as Pikmin Bloom, Peridot or Ingress, stops at
+      sign-in (if installed).
 - [ ] For each game, note what it shows: an error, a retry loop, a spinner.
 
 ## 5 Still working on the blocked device

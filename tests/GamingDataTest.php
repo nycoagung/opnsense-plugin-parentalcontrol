@@ -105,6 +105,8 @@ check('data: the game hosts are the design\'s',
     array_map(fn(array $s): array => ['hosts' => $s['hosts'] ?? [], 'ranges' => $s['ranges'] ?? []], $servers),
     [
         'pokemon_go' => ['hosts' => ['pgorelease.nianticlabs.com'], 'ranges' => []],
+        'monster_hunter_now' => ['hosts' => ['magellan-rel.nianticlabs.com'], 'ranges' => []],
+        'niantic_sign_in' => ['hosts' => ['identity.nianticlabs.com'], 'ranges' => []],
         'honkai_impact_3rd' => ['hosts' => [
             'outer-dp-overseas01.honkaiimpact3.com', 'outer-dp-usa01.honkaiimpact3.com',
             'outer-dp-jp01.honkaiimpact3.com', 'outer-dp-kr01.honkaiimpact3.com', 'outer-dp-asia01.honkaiimpact3.com',
