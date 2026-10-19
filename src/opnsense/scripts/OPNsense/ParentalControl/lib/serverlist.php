@@ -122,7 +122,8 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
         'refreshed_at' => time(),
         'errors' => array_merge(
             refreshErrors([$found, $answered], $published['failed'], $guard['missing']),
-            $ranges['errors']
+            $ranges['errors'],
+            $diff['errors']
         ),
     ]];
 }

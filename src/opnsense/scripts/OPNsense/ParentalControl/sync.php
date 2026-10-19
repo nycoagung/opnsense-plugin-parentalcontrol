@@ -757,6 +757,9 @@ if ($staleTable !== null) {
 
 $want = array_keys($blockSet);
 $diff = syncTable($backend, $aliasName, $want);
+foreach ($diff['errors'] as $error) {
+    fwrite(STDERR, "$error\n");
+}
 
 /* Established connections survive a new block, so a stream already running
    keeps going until it ends by itself. Dropping their states is what makes
@@ -825,14 +828,18 @@ if ($msgObjectsOk) {
         count($msgDiff['added']),
         count($msgDiff['removed'])
     );
+    foreach ($msgDiff['errors'] as $error) {
+        fwrite(STDERR, "messaging: $error\n");
+    }
 
     /* As for the internet switch, a new block must also cut what is already open. */
+    $failures = $msgDiff['errors'];
     if ($mdl->general->kill_states->isEqual('1')) {
-        $failures = dropMessagingStates($backend, $msgWant, $msgDiff['added'], $dest, $addedDest);
-        /* status shows the errors the cache holds */
-        if ($failures !== [] && $cache !== null) {
-            $cache['errors'] = array_merge($cache['errors'], $failures);
-            writeCache(MSG_CACHE_FILE, $cache);
-        }
+        $failures = array_merge($failures, dropMessagingStates($backend, $msgWant, $msgDiff['added'], $dest, $addedDest));
+    }
+    /* status shows the errors the cache holds */
+    if ($failures !== [] && $cache !== null) {
+        $cache['errors'] = array_merge($cache['errors'], $failures);
+        writeCache(MSG_CACHE_FILE, $cache);
     }
 }
