@@ -108,11 +108,16 @@ Config::getInstance()->forceReload();
 $aliasMdl = new Alias();
 $aliasUuids = [];           /* uuid => name */
 $tables = [];               /* the external aliases' names: pf holds their addresses */
+/* the external aliases, whose pf tables are flushed and killed; the local-networks
+   alias and the two gaming port aliases are not tables */
+$tableMarkers = array_merge([MARK_BLOCK, MARK_MSG_DEVICES, MARK_MSG_SERVERS],
+    array_values(array_intersect_key(GAME_ALIASES, array_flip(GAME_TABLES))));
 foreach ($aliasMdl->aliases->alias->iterateItems() as $uuid => $item) {
-    foreach ([MARK_BLOCK, MARK_LOCAL, MARK_MSG_DEVICES, MARK_MSG_SERVERS] as $marker) {
+    foreach (array_merge([MARK_BLOCK, MARK_LOCAL, MARK_MSG_DEVICES, MARK_MSG_SERVERS], array_values(GAME_ALIASES))
+        as $marker) {
         if (strpos($item->description->getValue(), $marker) === 0) {
             $aliasUuids[$uuid] = $item->name->getValue();
-            if ($marker !== MARK_LOCAL) {
+            if (in_array($marker, $tableMarkers, true)) {
                 $tables[] = $item->name->getValue();
             }
             break;
@@ -122,7 +127,7 @@ foreach ($aliasMdl->aliases->alias->iterateItems() as $uuid => $item) {
 $filterMdl = new Filter();
 $ruleUuids = [];
 foreach ($filterMdl->rules->rule->iterateItems() as $uuid => $rule) {
-    foreach ([MARK_RULE, MARK_MSG_RULE, MARK_NOTIFY_RULE] as $marker) {
+    foreach (array_merge([MARK_RULE, MARK_MSG_RULE, MARK_NOTIFY_RULE], array_keys(GAME_RULES)) as $marker) {
         if (strpos($rule->description->getValue(), $marker) === 0) {
             $ruleUuids[] = $uuid;
             break;
