@@ -12,16 +12,17 @@
  */
 
 /**
- * Should this device be denied messaging right now?
+ * Should this device be denied $what (messaging, gaming) right now?
  *
+ * One decision for every category, so they cannot come to disagree about a device.
  * First match wins. Mode and Override do not take part: they steer only the
  * whole-internet switch. An unrecognised setting blocks, because a damaged
- * setting must not quietly let messaging through.
+ * setting must not quietly let the category through.
  *
  * @param array{bool, string} $schedule scheduleDecision() for this device
  * @return array{bool, string} [blocked, reason]
  */
-function messagingDecision(bool $pluginEnabled, bool $deviceEnabled, string $setting, array $schedule): array
+function categoryDecision(string $what, bool $pluginEnabled, bool $deviceEnabled, string $setting, array $schedule): array
 {
     if (!$pluginEnabled) {
         return [false, 'plugin disabled'];
@@ -30,15 +31,26 @@ function messagingDecision(bool $pluginEnabled, bool $deviceEnabled, string $set
         return [false, 'device disabled'];
     }
     if ($setting === 'off') {
-        return [false, 'messaging allowed'];
+        return [false, "$what allowed"];
     }
     if ($setting === 'on') {
-        return [true, 'messaging always blocked'];
+        return [true, "$what always blocked"];
     }
     if ($setting === 'schedule') {
-        return [$schedule[0], 'messaging: ' . $schedule[1]];
+        return [$schedule[0], "$what: " . $schedule[1]];
     }
-    return [true, 'unknown messaging setting'];
+    return [true, "unknown $what setting"];
+}
+
+/**
+ * Should this device be denied messaging right now? categoryDecision() for messaging.
+ *
+ * @param array{bool, string} $schedule scheduleDecision() for this device
+ * @return array{bool, string} [blocked, reason]
+ */
+function messagingDecision(bool $pluginEnabled, bool $deviceEnabled, string $setting, array $schedule): array
+{
+    return categoryDecision('messaging', $pluginEnabled, $deviceEnabled, $setting, $schedule);
 }
 
 /**
