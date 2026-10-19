@@ -148,6 +148,15 @@ check('ranges: sources come from RIPEstat by AS and from ARIN by network name, m
 check('ranges: a published list is still read from its URL, as published',
       gen.strs(gen.app_ranges('example', {'ranges_url': 'https://lists.example/cidr.txt'}, get)),
       ['192.0.2.0/25', '192.0.2.128/25'])
+check('ranges: extra ranges are read as networks',
+      gen.strs(gen.extra_ranges('example', {'extra_ranges': ['198.51.100.0/24', '203.0.113.128/25']})),
+      ['198.51.100.0/24', '203.0.113.128/25'])
+check('ranges: an app without extra ranges has none',
+      gen.extra_ranges('example', {'hosts': ['a.example']}),
+      [])
+check('ranges: an extra range with host bits set stops the build',
+      error(gen.extra_ranges, 'example', {'extra_ranges': ['198.51.100.7/24']}),
+      'example: extra range 198.51.100.7/24 is not a network address')
 check('ranges: an app with no ranges has none',
       gen.app_ranges('example', {'hosts': ['a.example']}, get),
       [])

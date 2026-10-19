@@ -133,6 +133,9 @@ their lists. Two entries take more with them, on a blocked device only:
   never through DNS, so it can only be blocked by Kakao's own address space. That
   also takes other Kakao services: Daum, Tistory, Melon, Kakao Map, Kakao
   Developers and "Log in with Kakao".
+- **LINE** is blocked by LINE's own network (AS38631) as well as by name: its
+  gateways sit in several countries, with a backup, and the app moves between
+  them. That also takes LINE's other services on that network with it.
 
 Not offered, and why:
 
@@ -171,11 +174,15 @@ filter, depending on nothing outside OPNsense core:
   copy shipped with the plugin, stand in for a download that fails. A downloaded
   range wider than a /8 is ignored, and so is one that reaches into private,
   local, carrier-grade NAT or multicast address space: blocking that would cut a
-  device off its own network or the firewall.
-- **Shipped ranges.** Viber's and KakaoTalk's networks ship with the plugin and
-  are not downloaded: the networks registered to Viber in ARIN's registry, and
-  the address blocks Kakao announces from its own networks (AS7625, AS18160,
-  AS38099 and AS152199). They change only with a new release.
+  device off its own network or the firewall. Telegram's apps also have an address
+  built in from a block that Telegram announces but leaves out of its list,
+  95.161.64.0/20; that block ships with the plugin and is blocked with whichever
+  list is used.
+- **Shipped ranges.** Viber's, KakaoTalk's and LINE's networks ship with the
+  plugin and are not downloaded: the networks registered to Viber in ARIN's
+  registry, the address blocks Kakao announces from its own networks (AS7625,
+  AS18160, AS38099 and AS152199), and those LINE announces (AS38631). They change
+  only with a new release.
 - **Never emptied.** A failed lookup or download does not empty the list, and the
   errors show in Status.
 - **Protected names.** A list of names that must never be blocked (iCloud,
@@ -188,7 +195,7 @@ filter, depending on nothing outside OPNsense core:
   whether an address it finds is shared with that name, so it learns nothing new
   until the name resolves again, and Status says "learning paused: no answer for
   …". The guard also looks inside ranges: an app's range (Telegram's downloaded
-  ones, Viber's and KakaoTalk's shipped ones) that holds a protected name's
+  ones, Viber's, KakaoTalk's and LINE's shipped ones) that holds a protected name's
   address is left out ("range … holds protected address …; not blocked"), while a
   notification range that holds one stays blocked, because the notification cut
   wins, and Status names it too.
@@ -479,14 +486,26 @@ Blocking messaging is by server address, which sets its limits:
   caught.
 - Blocking is by server address, not by app, so a selected app's web version is
   blocked too.
-- Facebook & Instagram and KakaoTalk take other services with them on a blocked
-  device: Threads, Meta AI, "Log in with Facebook" and the rest, and other Kakao
-  services such as Daum and Kakao Map (see The apps).
+- Facebook & Instagram, KakaoTalk and LINE take other services with them on a
+  blocked device: Threads, Meta AI, "Log in with Facebook" and the rest, other
+  Kakao services such as Daum and Kakao Map, and LINE's other services (see The
+  apps).
 - Meta also serves photos and videos from caches inside internet providers'
   networks, which are not blocked. The apps still stop, because their own servers
   are blocked, but a photo linked from elsewhere may still load.
-- Viber has a proxy setting of its own, which gets around the block. Viber calls
-  may also still connect: its call relays could not all be identified.
+- A proxy set up in an app gets around the block: Signal's and Telegram's proxies,
+  WhatsApp's proxy setting and Viber's. So does Signal's censorship circumvention,
+  which the app offers once it cannot connect: it goes through Google's and
+  Fastly's front ends, which cannot be blocked without blocking them.
+- When Telegram cannot reach its servers it fetches a backup address over
+  DNS-over-HTTPS or from Google's Firebase, and that address can lie outside its
+  ranges.
+- Viber calls may still connect: its call relays could not all be identified.
+- Some apps' names point at cloud load balancers (Snapchat's, Viber's, and LINE's
+  gateway in the United States, on Amazon Web Services or Google Cloud). An
+  address learned there is kept for 7 days, so if the provider hands it to another
+  customer meanwhile, that customer's service is blocked on blocked devices until
+  the address is forgotten.
 - When Messenger signs in on a device for the first time, its one-time setup of
   encrypted chats may use `v.whatsapp.net`, which is on WhatsApp's list. With
   WhatsApp selected and Facebook & Instagram not, that setup may fail on a blocked
@@ -501,8 +520,8 @@ Blocking messaging is by server address, which sets its limits:
   push or some desktop clients, is not covered.
 - Phones that use a manufacturer's own notification service instead of Google's, as
   some phones sold in China do, are not covered.
-- Apple's ranges, Microsoft's list, and Viber's and KakaoTalk's networks are only
-  as current as the installed plugin version.
+- Apple's ranges, Microsoft's list, and Viber's, KakaoTalk's and LINE's networks
+  are only as current as the installed plugin version.
 - The list of apps is one for every device: there is no per-device choice.
 - While a device uses messaging and the firewall's own resolver is failing, each
   per-minute sync spends up to about 30 to 40 seconds on lookups while it holds its
@@ -532,10 +551,10 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | File | Checks | What it covers |
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
-| `tests/MessagingTest.php` | 162 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/MessagingDataTest.php` | 34 | `messaging.json`: no private range or shared-CDN range in it, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, Viber's and KakaoTalk's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
+| `tests/MessagingTest.php` | 165 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/MessagingDataTest.php` | 42 | `messaging.json`: no private range or shared-CDN range in it, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
-| `tests/BuildMessagingDataTest.py` | 21 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
+| `tests/BuildMessagingDataTest.py` | 24 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
@@ -550,8 +569,8 @@ rule's ports, every one caught. In the first three library stages each of
 the 89 checks was shown failing under at least one broken copy. Every broken copy
 was caught except seven in `MessagingTest.php`: five behave the same as the
 original on every input that can occur, and two fold the case of alias names,
-which the tests leave open on purpose. For 0.2.0, 23 more broken copies were all
-caught: 8 of the library, 3 of the generator, 10 of the data file and 2 of the
+which the tests leave open on purpose. For 0.2.0, 27 more broken copies were all
+caught: 10 of the library, 5 of the generator, 10 of the data file and 2 of the
 migration.
 
 **Static analysis (0.2.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
@@ -694,12 +713,15 @@ without the protected names it owns, as the plugin judges them while that app is
 selected. Use it when a host name is added or an app moves servers. The output
 shows the DNS of the network it ran on: read it, never commit it.
 
-**Before each release, check Viber's and Kakao's sources.** Their networks are
-built from the network names and AS numbers in `tools/messaging-sources.json`,
-which do not update themselves. Check in ARIN's registry that Viber's networks are
-still registered as `AWS-VIBER-MEDIA` and `AWS-VIBER`, with no new one under
-another name, and in RIPEstat that Kakao still announces from AS7625, AS18160,
-AS38099 and AS152199, with no new AS of its own. Kakao Games, Kakao Pay, KakaoBank
+**Before each release, check Viber's, Kakao's and Telegram's sources.** Their
+networks are built from the network names, AS numbers and extra ranges in
+`tools/messaging-sources.json`, which do not update themselves. Check in RIPEstat
+that Telegram's networks (AS62041, AS59930, AS62014, AS44907 and AS211157)
+announce nothing outside its published list and its `extra_ranges`. Check in
+ARIN's registry that Viber's networks are still registered as `AWS-VIBER-MEDIA`
+and `AWS-VIBER`, with no new one under another name, and in RIPEstat that Kakao
+still announces from AS7625, AS18160, AS38099 and AS152199, with no new AS of its
+own, and that LINE still announces from AS38631. Kakao Games, Kakao Pay, KakaoBank
 and Kakao Pay Insurance are separate companies with their own networks and stay
 out. Then regenerate and read the diff: a range that grows a lot needs a look
 before it ships.

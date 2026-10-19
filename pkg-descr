@@ -41,6 +41,17 @@ Plugin Changelog
   range that reaches into any special-purpose block
 * WhatsApp's fallback chat name is blocked too: once its main chat server is
   blocked, WhatsApp moves to it within a minute or two
+* Signal's current apps send messages through grpc.chat.signal.org, which is
+  now on its list; Snapchat's chat gateway, duplex connection and API variants
+  and LINE's backup, regional and media gateways are added too
+* Telegram's apps have an address built in from a block Telegram leaves out of
+  its published list: that block, 95.161.64.0/20, ships with the plugin and is
+  blocked with the downloaded list
+* LINE is blocked by its own network (AS38631), like KakaoTalk, which also
+  blocks LINE's other services on blocked devices
+* Facebook & Instagram lists every gateway, live-message and encrypted-chat
+  server family Meta's apps use, with their fallbacks, and Facebook Lite;
+  WhatsApp's media fallback is listed too
 
 0.1.0
 

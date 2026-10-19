@@ -49,7 +49,8 @@ $apps = $data['apps'] ?? [];
 $notes = $data['notifications'] ?? [];
 $shared = $data['shared_cdn_ranges'] ?? [];
 $appHosts = array_merge([], ...array_values(array_column($apps, 'hosts')));
-$appRanges = array_merge([], ...array_values(array_column($apps, 'ranges')));
+$appRanges = array_merge([], ...array_values(array_column($apps, 'ranges')),
+    ...array_values(array_column($apps, 'extra_ranges')));
 $allRanges = array_merge($appRanges, $notes['apple_ranges'] ?? [], $notes['microsoft_ranges'] ?? [], $shared);
 $network = fn(string $cidr): string => explode('/', $cidr)[0];
 
@@ -115,8 +116,9 @@ check('owners: the six Meta names belong to facebook_instagram',
 /* so that selecting Facebook & Instagram can never take WhatsApp down */
 check('owners: WhatsApp\'s own names are protected and belong to whatsapp',
     array_map(fn(string $h): array => [in_array($h, $protectedHosts, true), $owners[$h] ?? null],
-        ['g.whatsapp.net', 'g-fallback.whatsapp.net', 'web.whatsapp.com', 'mmg.whatsapp.net']),
-    array_fill(0, 4, [true, 'whatsapp']));
+        ['g.whatsapp.net', 'g-fallback.whatsapp.net', 'web.whatsapp.com', 'mmg.whatsapp.net',
+         'mmg-fallback.whatsapp.net']),
+    array_fill(0, 5, [true, 'whatsapp']));
 
 /* the design's own examples of names that must stay reachable: without them, an app
    address shared with Facebook or Instagram would be blocked, and nothing would say so */
@@ -138,6 +140,43 @@ check('data: excluded names absent',
 
 /* WhatsApp's fallback chat servers: the names rotate between its two AWS Global
    Accelerators, so any one left out lets the app reach whichever it points at */
+/* Meta runs its apps' gateways, live-message (MQTT) and encrypted-chat servers in several
+   families, each name with a -fallback twin served from another site; a blocked app moves
+   to them, so all are listed */
+check('facebook_instagram: every gateway, live-message and encrypted-chat family is listed',
+    array_values(array_diff(['z-m-gateway.facebook.com', 'test-gateway.instagram.com', 'z-p4-gateway.facebook.com',
+        'z-p42-gateway.instagram.com', 'mqtt-p4.facebook.com', 'mqtt-ig-p4.facebook.com', 'chat-e2ee-ig.facebook.com',
+        'z-p4-chat-e2ee.facebook.com', 'edge-stun.facebook.com'], $apps['facebook_instagram']['hosts'] ?? [])),
+    []);
+check('facebook_instagram: their fallbacks are listed',
+    array_values(array_diff(['z-m-gateway-fallback.facebook.com', 'test-gateway-fallback.instagram.com',
+        'z-p4-gateway-fallback.facebook.com', 'z-p42-gateway-fallback.instagram.com', 'mqtt-mini-fallback.facebook.com',
+        'mqtt-p4-fallback.facebook.com', 'mqtt-ig-p4-fallback.facebook.com', 'chat-e2ee-ig-fallback.facebook.com',
+        'z-p42-chat-e2ee-ig-fallback.facebook.com', 'z-p4-chat-e2ee-fallback.facebook.com',
+        'z-p3-graph-fallback.facebook.com', 'edge-stun-fallback.facebook.com', 'edge-chat-fallback.instagram.com'],
+        $apps['facebook_instagram']['hosts'] ?? [])),
+    []);
+check('whatsapp: the media fallback name is listed',
+    in_array('mmg-fallback.whatsapp.net', $apps['whatsapp']['hosts'] ?? [], true),
+    true);
+/* Telegram's apps have an address of their own built in, in a block Telegram announces
+   but leaves out of its published list */
+check('telegram: the extra ranges hold the address its apps have built in',
+    ipv4InAny('95.161.76.100', $apps['telegram']['extra_ranges'] ?? []),
+    true);
+/* current Signal apps send and receive messages through grpc.chat.signal.org */
+check('signal: the message connection name is listed',
+    in_array('grpc.chat.signal.org', $apps['signal']['hosts'] ?? [], true),
+    true);
+check('snapchat: the chat gateway, the duplex connection and the API variants are listed',
+    array_values(array_diff(['chat-gateway-prod.chat.snapchat.com', 'aws.duplex.snapchat.com',
+        'usc1-gcp-v62.api.snapchat.com', 'use4-gcp-v4.api.snapchat.com', 'use4-gcp-v6.api.snapchat.com'],
+        $apps['snapchat']['hosts'] ?? [])),
+    []);
+check('line: the backup, regional and media gateways are listed',
+    array_values(array_diff(['legy-backup.line-apps.com', 'gwk.line.naver.jp', 'gwz.line.naver.jp',
+        'legy-us-short.line.naver.jp', 'obs.line-apps.com'], $apps['line']['hosts'] ?? [])),
+    []);
 check('whatsapp: edge names e1-e16 are listed',
     array_values(array_diff(
         array_map(fn(int $i): string => "e$i.whatsapp.net", range(1, 16)),
@@ -180,6 +219,7 @@ check('data: lists non-empty',
         'shared_cdn_ranges' => $shared,
         'telegram ranges' => $apps['telegram']['ranges'] ?? [],
         'kakaotalk ranges' => $apps['kakaotalk']['ranges'] ?? [],
+        'line ranges' => $apps['line']['ranges'] ?? [],
         'viber ranges' => $apps['viber']['ranges'] ?? [],
     ], fn(array $list): bool => $list === [])),
     []);
@@ -188,12 +228,18 @@ check('data: lists non-empty',
    /8 and overlap no shared CDN and no notification range, either way round */
 $overlaps = fn(string $a, string $b): bool => ipv4InCidr($network($a), $b) || ipv4InCidr($network($b), $a);
 $guarded = array_merge($shared, $notes['apple_ranges'] ?? [], $notes['microsoft_ranges'] ?? []);
-check('ranges: kakaotalk and viber ranges are at most /8 wide and clear of CDNs and notification ranges',
+check('ranges: kakaotalk, line and viber ranges are at most /8 wide and clear of CDNs and notification ranges',
     array_values(array_filter(
-        array_merge($apps['kakaotalk']['ranges'] ?? [], $apps['viber']['ranges'] ?? []),
+        array_merge($apps['kakaotalk']['ranges'] ?? [], $apps['line']['ranges'] ?? [], $apps['viber']['ranges'] ?? []),
         fn(string $c): bool => (int)explode('/', $c)[1] < 8
             || array_filter($guarded, fn(string $o): bool => $overlaps($c, $o)) !== [])),
     []);
+/* LINE is blocked by its own network: its gateways in Singapore, Japan and Korea, its
+   backup gateway and its media host all sit in it */
+check('ranges: line holds its gateways and its media host',
+    array_map(fn(string $ip): bool => ipv4InAny($ip, $apps['line']['ranges'] ?? []),
+        ['147.92.165.67', '147.92.185.1', '147.92.240.246', '43.223.23.118', '147.92.146.190']),
+    array_fill(0, 5, true));
 /* the chat entry point, aloha.viber.com, sits in Viber's own registered block */
 check('ranges: viber holds the chat entry block',
     ipv4InAny('52.0.252.1', $apps['viber']['ranges'] ?? []),

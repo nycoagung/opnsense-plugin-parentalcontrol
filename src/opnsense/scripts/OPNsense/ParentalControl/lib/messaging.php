@@ -571,10 +571,12 @@ function rangesDue(?array $entry, int $now, int $maxAge, int $retryAfter): bool
  * failed: the entry keeps its last good copy and that copy's time, and records when
  * it failed, which holds the next try back. A good download replaces the entry,
  * failure and all. Each app's ranges are choosePublished() of this run's download,
- * the last good one and the shipped copy. An app with no ranges_url uses its
- * shipped ranges only, never a copy the cache kept from a version that had one.
+ * the last good one and the shipped copy, plus its extra ranges, each range once:
+ * ranges the app's own list leaves out, shipped with the plugin. An app with no
+ * ranges_url uses its shipped ranges only, never a copy the cache kept from a
+ * version that had one.
  *
- * @param array<string, array{ranges_url?: ?string, ranges?: list<string>}> $apps the
+ * @param array<string, array{ranges_url?: ?string, ranges?: list<string>, extra_ranges?: list<string>}> $apps the
  *        selected apps' entries in messaging.json, by id
  * @param array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}> $published
  *        the cache's downloads, by app id; until one works, fetched_at is 0 and
@@ -615,7 +617,10 @@ function refreshPublished(
             }
             $lastGood = $entry['ranges'] ?? [];
         }
-        $ranges[$id] = choosePublished($fresh, $lastGood, $app['ranges'] ?? []);
+        $ranges[$id] = array_values(array_unique(array_merge(
+            choosePublished($fresh, $lastGood, $app['ranges'] ?? []),
+            $app['extra_ranges'] ?? []
+        )));
     }
     return ['ranges' => $ranges, 'published' => $published, 'failed' => $failed];
 }

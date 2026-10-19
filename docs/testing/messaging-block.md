@@ -109,6 +109,11 @@ the default.
       server is blocked it moves to a fallback within a minute or two, so a check
       made at once proves less.
 
+### LINE
+
+- [ ] LINE's other services fail too. That is expected: LINE is blocked by its own
+      network.
+
 ### Viber
 
 - [ ] Sending and receiving fail, and an open chat stops updating.
@@ -129,6 +134,7 @@ the default.
 - [ ] Messenger: sending, receiving and calls fail.
 - [ ] Instagram: the feed does not load, and direct messages fail.
 - [ ] Threads does not load. That is expected: it runs on Instagram's servers.
+- [ ] Facebook Lite and Instagram Lite, if the device has them, do not load either.
 - [ ] In a browser, facebook.com, messenger.com and instagram.com do not load.
 
 ## 5 Notifications on the blocked device

@@ -2,28 +2,33 @@
   "apps": {
     "line": {
       "label": "LINE",
-      "hosts": ["legy.line-apps.com", "gd2.line.naver.jp", "line.me"],
-      "ranges_url": null
+      "hosts": ["legy.line-apps.com", "gd2.line.naver.jp", "line.me", "legy-backup.line-apps.com",
+                "gwz.line.naver.jp", "gwk.line.naver.jp", "legy-us-short.line.naver.jp", "obs.line-apps.com"],
+      "ranges_sources": [{"ripestat_asn": 38631}]
     },
     "signal": {
       "label": "Signal",
-      "hosts": ["chat.signal.org", "sfu.voip.signal.org"],
+      "hosts": ["grpc.chat.signal.org", "chat.signal.org", "sfu.voip.signal.org"],
       "ranges_url": null
     },
     "snapchat": {
       "label": "Snapchat",
-      "hosts": ["app.snapchat.com", "aws.api.snapchat.com", "gcp.api.snapchat.com", "snapchat.com"],
+      "hosts": ["app.snapchat.com", "aws.api.snapchat.com", "gcp.api.snapchat.com", "snapchat.com",
+                "chat-gateway-prod.chat.snapchat.com", "aws.duplex.snapchat.com", "usc1-gcp-v62.api.snapchat.com",
+                "use4-gcp-v4.api.snapchat.com", "use4-gcp-v6.api.snapchat.com"],
       "ranges_url": null
     },
     "telegram": {
       "label": "Telegram",
       "hosts": ["telegram.org", "web.telegram.org", "t.me"],
-      "ranges_url": "https://core.telegram.org/resources/cidr.txt"
+      "ranges_url": "https://core.telegram.org/resources/cidr.txt",
+      "extra_ranges": ["95.161.64.0/20"]
     },
     "whatsapp": {
       "label": "WhatsApp",
       "hosts": [
-        "g.whatsapp.net", "g-fallback.whatsapp.net", "mmg.whatsapp.net", "api.whatsapp.net",
+        "g.whatsapp.net", "g-fallback.whatsapp.net", "mmg.whatsapp.net", "mmg-fallback.whatsapp.net",
+        "api.whatsapp.net",
         "pps.whatsapp.net", "static.whatsapp.net", "v.whatsapp.net", "web.whatsapp.com",
         "whatsapp.com", "whatsapp.net", "wa.me",
         "e1.whatsapp.net", "e2.whatsapp.net", "e3.whatsapp.net", "e4.whatsapp.net",
@@ -36,22 +41,32 @@
     "facebook_instagram": {
       "label": "Facebook & Instagram",
       "hosts": [
-        "edge-mqtt.facebook.com", "mqtt-mini.facebook.com",
-        "gateway.facebook.com", "gateway.messenger.com", "gateway.instagram.com",
-        "chat-e2ee.facebook.com", "chat-e2ee-mini.facebook.com", "web-chat-e2ee.facebook.com",
-        "z-p42-chat-e2ee-ig.facebook.com",
-        "facebook.com", "www.facebook.com", "m.facebook.com", "b-graph.facebook.com",
-        "b-api.facebook.com", "graph.facebook.com", "api.facebook.com", "edge-chat.facebook.com",
-        "rupload.facebook.com",
+        "edge-mqtt.facebook.com", "mqtt-mini.facebook.com", "gateway.facebook.com", "gateway.messenger.com",
+        "gateway.instagram.com", "chat-e2ee.facebook.com", "chat-e2ee-mini.facebook.com",
+        "web-chat-e2ee.facebook.com", "z-p42-chat-e2ee-ig.facebook.com",
+        "z-m-gateway.facebook.com", "test-gateway.instagram.com", "z-p4-gateway.facebook.com",
+        "z-p42-gateway.instagram.com", "mqtt-p4.facebook.com", "mqtt-ig-p4.facebook.com",
+        "chat-e2ee-ig.facebook.com", "z-p4-chat-e2ee.facebook.com", "edge-stun.facebook.com",
+        "facebook.com", "www.facebook.com", "m.facebook.com", "b-graph.facebook.com", "b-api.facebook.com",
+        "graph.facebook.com", "api.facebook.com", "edge-chat.facebook.com", "rupload.facebook.com",
         "messenger.com", "www.messenger.com", "edge-chat.messenger.com", "m.me",
-        "instagram.com", "www.instagram.com", "b.i.instagram.com", "i.instagram.com",
-        "graph.instagram.com", "graphql.instagram.com", "edge-chat.instagram.com",
-        "iglite-z.instagram.com",
+        "instagram.com", "www.instagram.com", "b.i.instagram.com", "i.instagram.com", "graph.instagram.com",
+        "graphql.instagram.com", "edge-chat.instagram.com", "iglite-z.instagram.com", "iglite-d.instagram.com",
         "star.fallback.c10r.facebook.com", "star-mini.fallback.c10r.facebook.com",
-        "mqtt.fallback.c10r.facebook.com", "dgw.fallback.c10r.facebook.com",
-        "chat-e2ee-fallback.facebook.com", "chat-e2ee-mini-fallback.facebook.com",
-        "b-fallback.i.instagram.com", "i-fallback.instagram.com", "graph-fallback.instagram.com",
-        "scontent.xx.fbcdn.net", "video.xx.fbcdn.net", "scontent.cdninstagram.com"
+        "mqtt.fallback.c10r.facebook.com", "dgw.fallback.c10r.facebook.com", "chat-e2ee-fallback.facebook.com",
+        "chat-e2ee-mini-fallback.facebook.com", "b-fallback.i.instagram.com", "i-fallback.instagram.com",
+        "graph-fallback.instagram.com",
+        "z-m-gateway-fallback.facebook.com", "test-gateway-fallback.instagram.com",
+        "z-p4-gateway-fallback.facebook.com", "z-p42-gateway-fallback.instagram.com",
+        "mqtt-mini-fallback.facebook.com", "mqtt-p4-fallback.facebook.com", "mqtt-ig-p4-fallback.facebook.com",
+        "chat-e2ee-ig-fallback.facebook.com", "z-p42-chat-e2ee-ig-fallback.facebook.com",
+        "z-p4-chat-e2ee-fallback.facebook.com", "z-p3-graph-fallback.facebook.com",
+        "edge-stun-fallback.facebook.com", "edge-chat-fallback.instagram.com", "iglite-d-fallback.instagram.com",
+        "iglite-z-fallback.instagram.com",
+        "scontent.xx.fbcdn.net", "video.xx.fbcdn.net", "scontent.cdninstagram.com",
+        "scontent.fallback.xx.fbcdn.net", "video.fallback.xx.fbcdn.net",
+        "snaptu-d.facebook.com", "snaptu-z.facebook.com", "fblite-p1.fallback.c10r.facebook.com",
+        "fblite-mini.fallback.c10r.facebook.com", "z-m-graph.facebook.com", "z-p4-graph.facebook.com"
       ],
       "ranges_url": null
     },
@@ -70,7 +85,7 @@
   "protected_hosts": [
     "facebook.com", "www.facebook.com", "graph.facebook.com", "edge-mqtt.facebook.com",
     "www.instagram.com", "i.instagram.com",
-    "g.whatsapp.net", "g-fallback.whatsapp.net", "web.whatsapp.com", "mmg.whatsapp.net",
+    "g.whatsapp.net", "g-fallback.whatsapp.net", "web.whatsapp.com", "mmg.whatsapp.net", "mmg-fallback.whatsapp.net",
     "www.apple.com", "www.icloud.com", "gateway.icloud.com", "setup.icloud.com",
     "www.google.com", "www.youtube.com", "www.googleapis.com", "play.googleapis.com",
     "android.clients.google.com", "classroom.google.com", "connectivitycheck.gstatic.com",
@@ -82,7 +97,7 @@
     "graph.facebook.com": "facebook_instagram", "edge-mqtt.facebook.com": "facebook_instagram",
     "www.instagram.com": "facebook_instagram", "i.instagram.com": "facebook_instagram",
     "g.whatsapp.net": "whatsapp", "g-fallback.whatsapp.net": "whatsapp",
-    "web.whatsapp.com": "whatsapp", "mmg.whatsapp.net": "whatsapp"
+    "web.whatsapp.com": "whatsapp", "mmg.whatsapp.net": "whatsapp", "mmg-fallback.whatsapp.net": "whatsapp"
   },
   "notifications": {
     "apple_ranges": ["17.249.0.0/16", "17.252.0.0/16", "17.57.144.0/22", "17.188.128.0/18", "17.188.20.0/23"],

@@ -11,7 +11,9 @@ tools/messaging-sources.json and adds the lists it downloads:
 - the ranges of apps whose servers are handed out as bare addresses or sit in
   their own registered networks, from each app's ranges_sources: an AS's
   announced IPv4 prefixes from RIPEstat ({"ripestat_asn": N}) and networks by
-  name from ARIN's Whois-RWS ({"arin_name": "NAME"}), merged. Every app range
+  name from ARIN's Whois-RWS ({"arin_name": "NAME"}), merged, and the app's
+  extra_ranges, kept as written: ranges its published list leaves out, which
+  sync.php blocks with whichever list it uses. Every app range
   must be no wider than /8, clear of the shared CDNs and the notification
   ranges, and public all through, reaching into no special-purpose block;
 - the addresses Windows PCs reach the Windows Notification Service on: the
@@ -37,7 +39,10 @@ Where the hand-maintained data comes from: Apple's ranges from Apple support
 article 102266, "If your Apple devices aren't getting Apple push notifications";
 Google's host names and ports from Firebase's "Configure your Network for FCM";
 the apps' host names from a probe on 2026-10-18, each kept only while --check
-shows it on the network expected for it and kept by the guard. WhatsApp's
+shows it on the network expected for it and kept by the guard, and the apps'
+fallback, gateway and message-connection names from research on 2026-10-19
+(Signal's and Telegram's source code, public DNS datasets, the names a home
+network's devices looked up), each checked in DNS and owned by the app. WhatsApp's
 sixteen numbered edge names are all listed, since its own DNS zone rotates
 each of them between two AWS Global Accelerators.
 
@@ -149,6 +154,18 @@ def app_ranges(app_id, app, get=fetch):
     return sorted(ipaddress.collapse_addresses(nets))
 
 
+def extra_ranges(app_id, app):
+    """An app's extra_ranges: ranges its published list leaves out, shipped and
+    blocked with whichever list sync.php uses."""
+    nets = []
+    for cidr in app.get('extra_ranges', []):
+        try:
+            nets.append(ipaddress.ip_network(cidr))
+        except ValueError:
+            raise ValueError(f'{app_id}: extra range {cidr} is not a network address') from None
+    return nets
+
+
 def check_app_ranges(app_id, nets, cdn, notify):
     """sync.php blocks an app's ranges as they are, so each must be no wider than
     /8, clear of the shared CDNs and the notification ranges, and public all
@@ -191,9 +208,12 @@ def build(wns_file):
     apps = {}
     for app_id, app in src['apps'].items():
         ranges = app_ranges(app_id, app)
-        check_app_ranges(app_id, ranges, shared, notify)
+        extra = extra_ranges(app_id, app)
+        check_app_ranges(app_id, ranges + extra, shared, notify)
         apps[app_id] = {'label': app['label'], 'hosts': app['hosts'],
                         'ranges_url': app.get('ranges_url'), 'ranges': strs(ranges)}
+        if extra:
+            apps[app_id]['extra_ranges'] = strs(extra)
     return {
         'schema': 1,
         'generated': datetime.date.today().isoformat(),
@@ -245,7 +265,7 @@ def check():
     def protected(group):
         return {ip for host in data['protected_hosts'] if owners.get(host) != group for ip in answers[host]}
     cdn = [ipaddress.ip_network(c) for c in data['shared_cdn_ranges']]
-    listed = {f'{app_id} ranges': app['ranges'] for app_id, app in data['apps'].items()}
+    listed = {f'{app_id} ranges': app['ranges'] + app.get('extra_ranges', []) for app_id, app in data['apps'].items()}
     listed.update(apple_ranges=notes['apple_ranges'], microsoft_ranges=notes['microsoft_ranges'])
     listed = {name: [ipaddress.ip_network(c) for c in cidrs] for name, cidrs in listed.items()}
     for group, hosts in groups:

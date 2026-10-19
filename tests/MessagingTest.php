@@ -601,6 +601,20 @@ check('published: an app with no list address uses only its shipped ranges',
      $fetched],
     [['ranges' => ['n' => ['203.0.113.0/28']], 'published' => ['n' => $old + ['failed_at' => $now - 60]], 'failed' => []],
      []]);
+/* ranges an app's own published list leaves out are shipped as extra ranges and blocked
+   with whichever list is used: this run's download, the last good one or the shipped one */
+$extra = ['extra_ranges' => ['203.0.113.128/25', '198.51.100.0/24']];
+$answers = [$url => "198.51.100.0/24\n"];
+check('published: extra ranges are added to a fresh download, each range once',
+    refreshPublished(['t' => $listed + $extra], [], $now, $day, $hour, $fetch)['ranges'],
+    ['t' => ['198.51.100.0/24', '203.0.113.128/25']]);
+$answers = [];
+check('published: extra ranges are added to the last good list after a failed download',
+    refreshPublished(['t' => $listed + $extra], ['t' => $old], $now, $day, $hour, $fetch)['ranges'],
+    ['t' => ['203.0.113.64/26', '203.0.113.128/25', '198.51.100.0/24']]);
+check('published: extra ranges are added to the shipped ranges of an app with no list address',
+    refreshPublished(['n' => $unlisted + $extra], [], $now, $day, $hour, $fetch)['ranges'],
+    ['n' => ['203.0.113.0/28', '203.0.113.128/25', '198.51.100.0/24']]);
 
 /* ---- sanitizeCache --------------------------------------------------------- */
 
