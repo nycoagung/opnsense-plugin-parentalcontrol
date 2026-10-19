@@ -36,6 +36,9 @@ Plugin Changelog
   registry and from the prefixes Kakao announces
 * The Settings tab has no Save button any more: Apply saves the settings when
   they changed, then applies them, and an invalid setting stops it
+* A downloaded range that reaches into private, local, carrier-grade NAT or
+  multicast address space is ignored, and the data generator refuses an app
+  range that reaches into any special-purpose block
 
 0.1.0
 

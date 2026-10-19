@@ -186,6 +186,12 @@ check('ranges: trims lines, keeps input order',
 check('ranges: wider than a /8 is rejected',
     parseRanges("0.0.0.0/0\n198.0.0.0/7\n198.0.0.0/8\n198.51.100.7\n"),
     ['198.0.0.0/8', '198.51.100.7']);
+/* a published list reaching into a device's own network, the firewall's, or what
+   never leaves a host or link would cut blocked devices off them */
+check('ranges: private, local, shared and multicast space is rejected',
+    parseRanges("192.0.0.0/8\n172.0.0.0/11\n100.0.0.0/9\n10.1.0.0/16\n127.0.0.0/8\n169.254.0.0/16\n"
+        . "0.0.0.0/8\n224.0.0.0/8\n240.0.0.0/8\n192.168.30.7\n198.51.100.0/24\n"),
+    ['198.51.100.0/24']);
 
 /* ---- filterCandidates ------------------------------------------------------ */
 

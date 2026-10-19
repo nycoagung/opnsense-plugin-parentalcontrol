@@ -169,7 +169,9 @@ filter, depending on nothing outside OPNsense core:
 - **Published ranges.** Telegram's are downloaded from core.telegram.org once a
   day, with an hour's wait after a failed download. The last good copy, then the
   copy shipped with the plugin, stand in for a download that fails. A downloaded
-  range wider than a /8 is ignored.
+  range wider than a /8 is ignored, and so is one that reaches into private,
+  local, carrier-grade NAT or multicast address space: blocking that would cut a
+  device off its own network or the firewall.
 - **Shipped ranges.** Viber's and KakaoTalk's networks ship with the plugin and
   are not downloaded: the networks registered to Viber in ARIN's registry, and
   the address blocks Kakao announces from its own networks (AS7625, AS18160,
@@ -525,10 +527,10 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | File | Checks | What it covers |
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
-| `tests/MessagingTest.php` | 161 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/MessagingDataTest.php` | 32 | `messaging.json`: no private range or shared-CDN range in it, a host name for every app, a protected name listed by an app only when that app owns it, the owners, Viber's and KakaoTalk's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
+| `tests/MessagingTest.php` | 162 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/MessagingDataTest.php` | 33 | `messaging.json`: no private range or shared-CDN range in it, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, Viber's and KakaoTalk's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
-| `tests/BuildMessagingDataTest.py` | 20 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
+| `tests/BuildMessagingDataTest.py` | 21 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
@@ -543,8 +545,8 @@ rule's ports, every one caught. In the first three library stages each of
 the 89 checks was shown failing under at least one broken copy. Every broken copy
 was caught except seven in `MessagingTest.php`: five behave the same as the
 original on every input that can occur, and two fold the case of alias names,
-which the tests leave open on purpose. For 0.2.0, 17 more broken copies were all
-caught: 4 of the library, 3 of the generator, 8 of the data file and 2 of the
+which the tests leave open on purpose. For 0.2.0, 23 more broken copies were all
+caught: 8 of the library, 3 of the generator, 10 of the data file and 2 of the
 migration.
 
 **Static analysis (0.2.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
@@ -671,10 +673,11 @@ RIPEstat by AS number (`{"ripestat_asn": 7625}`); the shared CDNs' ranges
 RIPEstat); and Microsoft's Windows Notification Service list. It stops with exit
 status 1 before anything is written on a failed download, an entry that is not an
 address range, a Microsoft file without its client section, a list that comes out
-empty, an app range that is not public, is wider than a /8 or overlaps a shared CDN
-or a notification range, or an owner given for a name that is not protected or
-naming no app. `--wns FILE` reads a local copy of Microsoft's file instead of
-downloading it. Read the diff, and run the tests, before committing the result.
+empty, an app range that is wider than a /8, overlaps a shared CDN or a
+notification range, or reaches into private or other special-purpose address space,
+or an owner given for a name that is not protected or naming no app. `--wns FILE`
+reads a local copy of Microsoft's file instead of downloading it. Read the diff,
+and run the tests, before committing the result.
 
     python3 -I tools/build-messaging-data.py --check
 

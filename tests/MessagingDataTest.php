@@ -205,6 +205,17 @@ check('data: no private addresses',
     array_values(array_filter($allRanges,
         fn(string $c): bool => ipv4InAny($network($c), ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']))),
     []);
+/* every blocked range is public all through: one reaching into a special-purpose
+   block (IANA's registry, and multicast) would cut a blocked device off its own
+   network or the firewall */
+$special = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
+    '192.0.0.0/24', '192.0.2.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24',
+    '224.0.0.0/4', '240.0.0.0/4'];
+check('data: no blocked range reaches into special-purpose space',
+    array_values(array_filter(
+        array_merge($appRanges, $notes['apple_ranges'] ?? [], $notes['microsoft_ranges'] ?? []),
+        fn(string $c): bool => array_filter($special, fn(string $o): bool => $overlaps($c, $o)) !== [])),
+    []);
 
 /* The settings page offers what the model lists. An app missing there can never be
    chosen, so it is never blocked; one the data lacks is offered but blocks nothing. */

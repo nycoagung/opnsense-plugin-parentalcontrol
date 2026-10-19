@@ -153,14 +153,36 @@ function tableDiff(array $want, array $current): array
     ];
 }
 
+/* Address space a downloaded range may not reach into: what isPublicIpv4() turns
+   away (private, reserved and carrier-grade NAT space) and multicast. Blocking any
+   of it would cut a device off its own network, the firewall, or its own host.
+   The documentation blocks route nowhere, so blocking one costs nothing. */
+const NON_PUBLIC_RANGES = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
+    '172.16.0.0/12', '192.168.0.0/16', '224.0.0.0/4', '240.0.0.0/4'];
+
+/**
+ * Does the IPv4 range $cidr (or a bare address) overlap NON_PUBLIC_RANGES? Two
+ * ranges overlap when either holds the other's first address.
+ */
+function reachesNonPublic(string $cidr): bool
+{
+    foreach (NON_PUBLIC_RANGES as $range) {
+        if (ipv4InCidr(explode('/', $cidr)[0], $range) || ipv4InCidr(explode('/', $range)[0], $cidr)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * The valid IPv4 ranges in a downloaded list: unique, in input order.
  *
  * One range per line. Blanks, # comments, IPv6 and anything else are skipped, so
  * a list that grows other kinds of line still parses, and so is a range wider than
- * a /8, which no one service owns. A page with markup in it is not a list at all -
- * an error page can have a line that looks like an address - so any '<' discards
- * the whole text.
+ * a /8, which no one service owns, and one that reaches into a device's own network
+ * (reachesNonPublic()). A page with markup in it is not a list at all - an error
+ * page can have a line that looks like an address - so any '<' discards the whole
+ * text.
  *
  * @return list<string>
  */
@@ -172,7 +194,7 @@ function parseRanges(string $text): array
     $ranges = [];
     foreach (explode("\n", $text) as $line) {
         $line = trim($line);
-        if (isIpv4Cidr($line) && (int)(explode('/', $line)[1] ?? 32) >= 8) {
+        if (isIpv4Cidr($line) && (int)(explode('/', $line)[1] ?? 32) >= 8 && !reachesNonPublic($line)) {
             $ranges[$line] = true;
         }
     }

@@ -12,8 +12,8 @@ tools/messaging-sources.json and adds the lists it downloads:
   their own registered networks, from each app's ranges_sources: an AS's
   announced IPv4 prefixes from RIPEstat ({"ripestat_asn": N}) and networks by
   name from ARIN's Whois-RWS ({"arin_name": "NAME"}), merged. Every app range
-  must be public, no wider than /8, and clear of the shared CDNs and the
-  notification ranges;
+  must be no wider than /8, clear of the shared CDNs and the notification
+  ranges, and public all through, reaching into no special-purpose block;
 - the addresses Windows PCs reach the Windows Notification Service on: the
   <ClientIPsIPv4> element of Microsoft Download Center item 44238, "Windows
   Notification Service (WNS) VIP and IP Ranges". The file's address changes
@@ -65,6 +65,13 @@ ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / 'tools/messaging-sources.json'
 DATA = ROOT / 'src/opnsense/scripts/OPNsense/ParentalControl/messaging.json'
 CIDR = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b')
+# IANA's special-purpose IPv4 blocks that are not globally reachable, and multicast.
+# An app range may reach into none of them: IPv4Network.is_global judges a network by
+# its ends, so it passes 192.0.0.0/8, which holds 192.168.0.0/16.
+SPECIAL_PURPOSE = [ipaddress.ip_network(n) for n in (
+    '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
+    '192.0.0.0/24', '192.0.2.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24',
+    '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4')]
 
 
 def fetch(url, headers=None):
@@ -144,13 +151,14 @@ def app_ranges(app_id, app, get=fetch):
 
 def check_app_ranges(app_id, nets, cdn, notify):
     """sync.php blocks an app's ranges as they are, so each must be no wider than
-    /8, clear of the shared CDNs and the notification ranges, and public."""
+    /8, clear of the shared CDNs and the notification ranges, and public all
+    through: clear of every special-purpose block."""
     for n in nets:
         if n.prefixlen < 8:
             raise ValueError(f'{app_id}: {n} is wider than /8')
         if any(n.overlaps(c) for c in [*cdn, *notify]):
             raise ValueError(f'{app_id}: {n} overlaps a shared CDN or notification range')
-        if not n.is_global:
+        if any(n.overlaps(s) for s in SPECIAL_PURPOSE):
             raise ValueError(f'{app_id}: {n} is not a public range')
 
 

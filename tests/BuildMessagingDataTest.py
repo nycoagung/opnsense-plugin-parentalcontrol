@@ -172,6 +172,12 @@ check('ranges: a range overlapping a notification range stops the build',
 check('ranges: a range that is not public stops the build',
       error(gen.check_app_ranges, 'example', [net('192.0.2.0/24')], [], []),
       'example: 192.0.2.0/24 is not a public range')
+# a network is not public when any part of it is special-purpose space, not only
+# when its ends are: 192.0.0.0/8 holds 192.168.0.0/16
+wide = ['192.0.0.0/8', '172.0.0.0/11', '100.0.0.0/9', '224.0.0.0/8']
+check('ranges: a range reaching into private or special-purpose space stops the build',
+      [error(gen.check_app_ranges, 'example', [net(n)], [], []) for n in wide],
+      [f'example: {n} is not a public range' for n in wide])
 
 check('owners: an owner that is not an app stops the build',
       error(gen.check_owners, {'a.example': 'nobody'}, ['a.example'], ['whatsapp']),
