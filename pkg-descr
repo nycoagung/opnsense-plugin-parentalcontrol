@@ -2,8 +2,9 @@ Turn a device's internet access on or off, on a schedule or on demand.
 
 Adds a settings page under Firewall and a dashboard widget with per-device
 toggles. Enforcement is one firewall rule against one externally managed alias
-for the internet, and two rules and two such aliases for messaging, so switching
-a device takes effect immediately without a ruleset reload.
+for the internet, two rules and two such aliases for messaging, and three rules
+and three such aliases for gaming, so switching a device takes effect immediately
+without a ruleset reload.
 
 Blocked devices lose internet only - local services such as printers, media
 players and dashboards keep working.
@@ -15,10 +16,42 @@ keeps working. Blocking messaging also cuts every push notification
 on the device, including iMessage and incoming FaceTime calls, for as long as
 it lasts.
 
+A device can likewise be denied live online games, always or outside its
+allowed hours. The block goes by the kind of traffic games send: UDP to the
+internet is cut except on the few ports calls, Wi-Fi Calling, the web and the
+clock need, games' own TCP ports are cut, and a few games are blocked by their
+servers' addresses. Calls, Wi-Fi Calling, the web, video and app downloads keep
+working.
+
 WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 
 Plugin Changelog
 ----------------
+
+0.3.0
+
+* A Gaming setting on every device: Not blocked, Blocked, or Blocked outside
+  allowed hours, decided exactly as Messaging is
+* A device denied gaming cannot send UDP to the internet except on a short
+  safe-list (name lookups, time, the web over QUIC, Wi-Fi Calling, call relays,
+  FaceTime, Zoom, Meet, Signal), cannot use games' TCP ports, and cannot reach
+  Pokemon GO's, Honkai Impact 3rd's, Infinity Nikki's and Love and Deepspace's
+  servers or Vivox's in-game voice chat
+* UDP to the local network, the firewall itself, Discord's own network and the
+  messaging apps' own networks is never treated as gaming, so calls, a VPN back
+  home and Discord voice keep working
+* A game host's address is learned only when it is the name's own and public; an
+  answer through a CDN is left alone
+* No device is blocked from gaming until the never-blocked table holds the whole
+  local network
+* The Status tab and the status JSON show gaming per device and in a summary line
+* Table loads check every entry first and report a failed pfctl call, and only a
+  small change falls back to configd address by address
+* Every range is checked before it reaches a servers table, the shipped ones and
+  a download kept from an earlier version included
+* The messaging data build stops behind a filtering or failing resolver and on a
+  per-site list that shrank
+* tools/check-gaming-hosts.py checks the game hosts before a release
 
 0.2.0
 

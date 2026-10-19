@@ -488,3 +488,47 @@ checks. Steps 3 and 4 need the maintainer's hands.
 - Messaging's decision, server-list machinery, state drops and uninstall are reused, and
   Mode and Override stay out of the decision, as for messaging.
 - Breaking speed-test UDP checks and UDP VPN apps is accepted.
+
+## Changes made during implementation
+
+Where the finished code differs from what is written above, or adds to it. The text
+above is left as it was written.
+
+- **0.2.0 was reviewed and fixed first**, as the maintainer asked. Table loads now
+  check every entry and put it in pf's own form before pfctl, report a failed pfctl
+  call, and fall back to configd address by address only for 64 entries or fewer.
+  Every range passes one check (`acceptRange()`: an IPv4 network no wider than a /8,
+  outside private and special space) before a servers table: downloads, the cached
+  last good copy, the shipped app, extra and site ranges, and the notification
+  ranges. The messaging data build stops behind a filtering or failing resolver and
+  on a per-site list more than a tenth shorter than the committed one.
+- **One never-blocked table for rules 1 and 2.** Rule 2's game ports never reach the
+  calling networks, so the split this design describes would only add objects.
+- **A run-time answer rule** in place of growing the shared-CDN ranges with
+  Alibaba's and Tencent's, which are not published. A game host's answer counts only
+  when it is public and the name's own: a plain record, or one through an alias
+  ending in one of `gaming.json`'s `alias_suffixes` (`.elb.amazonaws.com`, a load
+  balancer of the game's own, as Honkai Impact 3rd's login names use). Any other
+  alias, a CDN's included, is ignored. The release-time tool is
+  `tools/check-gaming-hosts.py`, which applies the same rule through Google's public
+  DNS, plus the shared-CDN ranges and, with `--passive-dns`, other names on the
+  address.
+- **No device enters `NoGaming` until `Gaming_Exempt` holds the whole local set**
+  (`exemptReady()`), and the never-blocked table is filled before the game servers
+  and the devices on every run.
+- **Messaging and gaming share one decision function** (`categoryDecision()`), so the
+  two cannot disagree; messaging's reasons are unchanged.
+- **Core keeps port alias names in a private, process-wide list** (`PortField`) with no
+  reset, filled when the internet rule's model loads. On first use the gaming rules
+  would fail validation until the next run, so the list is cleared through reflection
+  after the port aliases are saved; should a later core rename it, the rules appear
+  one sync later.
+- **The model is version 1.3.0 without a migration**: a device saved before Gaming
+  existed loads with its default, Not blocked. The virtual-machine script checks this
+  on a real model by removing the field from a saved device.
+- **Connections are dropped per device**, as for messaging, only when a device is
+  newly denied gaming or a game server's address is new.
+- **`writeCache()`'s error no longer says "messaging:"**, since the gaming cache uses it.
+- **Device checklist and VM checks**: `docs/testing/gaming-block.md`, and section 5b of
+  `tests/vm/uninstall-test.sh`, whose gaming markers are a list of their own because
+  the gaming objects exist only once gaming is used.

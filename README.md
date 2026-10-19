@@ -1,8 +1,8 @@
 # os-parentalcontrol
 
-Turn a device's internet access on or off, on a schedule or on demand. A second,
-narrower switch blocks just a device's messaging apps and leaves the rest of its
-internet alone.
+Turn a device's internet access on or off, on a schedule or on demand. Two
+narrower switches block just a device's messaging apps, or just its live online
+games, and leave the rest of its internet alone.
 
 Adds **Firewall → Parental Control** and a dashboard widget with per-device
 switches. Blocked devices lose *internet only* — printers, media players, NAS
@@ -61,6 +61,24 @@ should have. If an alias with one of those names already exists and the plugin d
 not make it, the plugin does not take it over: messaging blocking stays off, the
 Status tab says why, and the internet switch keeps working. For the same reason the
 internet alias itself cannot be named `NoMessaging` or `Messaging_Servers`.
+
+**Gaming adds three more tables, two port aliases and three more rules**, made the
+first time a device uses gaming (see Blocking gaming), found and named the same
+way as messaging's, with the same handling of a rename by hand or a name someone
+else's alias holds:
+
+- `NoGaming`, the devices currently denied gaming
+- `Gaming_Servers`, the addresses of the games listed by name
+- `Gaming_Exempt`, the destinations never treated as gaming
+- `Gaming_UDP_Ports`, a port alias holding every UDP port except the short list
+  that calls, Wi-Fi Calling, the web and the clock need
+- `Gaming_TCP_Ports`, a port alias holding the TCP ports games use
+- three floating rules blocking `NoGaming`: UDP to anything outside
+  `Gaming_Exempt` on `Gaming_UDP_Ports`; TCP likewise on `Gaming_TCP_Ports`; and
+  everything to `Gaming_Servers`
+
+The rules only block, so they can never let through what another rule blocks. The
+internet alias cannot take any of these names either.
 
 ## Blocking messaging
 
@@ -239,6 +257,71 @@ file. `configctl parentalcontrol status` carries the same under a `messaging` ke
 and per device `messaging`, `messaging_blocked` and `messaging_reason`. The
 existing keys are unchanged, which is what the dashboard widget reads.
 
+## Blocking gaming
+
+Each device has a **Gaming** setting that works like Messaging: **Not blocked**,
+the default, also for devices saved by an earlier release; **Blocked**, always; or
+**Blocked outside allowed hours**, following the device's *Days* and *Internet
+allowed from / until* fields exactly as Messaging does, also when *Override* is
+*Force allow*. A device *uses gaming* in the same sense as it uses messaging, and
+until one does, nothing is looked up and the gaming objects are not made.
+
+The firewall cannot see inside traffic, so the plugin blocks the kind of traffic
+real-time games send: their play goes over UDP to ports of their own, while
+ordinary apps use TCP, or QUIC on port 443. A device denied gaming:
+
+- cannot send UDP to the internet except on the ports below, which other things
+  need;
+- cannot open TCP connections to the internet on the ports games use for play,
+  lobbies and chat: Supercell's games (9339), Minecraft Java servers (25565) and
+  Bedrock server joins (19132–19133), Photon and Unity Relay fallbacks, Call of
+  Duty, Battle.net, Riot's client, Warframe, World of Tanks, War Thunder, Destiny 2,
+  and the default ports of common game-server software;
+- cannot reach the servers of a few games listed by name, whatever traffic they
+  use: Pokémon GO, Honkai Impact 3rd, Infinity Nikki, Love and Deepspace, and
+  in-game voice chat (Vivox).
+
+| UDP ports a device denied gaming may still use | For |
+|---|---|
+| 53, 123 | name lookups, time |
+| 443 | the web and video over QUIC, iCloud Private Relay |
+| 500, 4500 | Wi-Fi Calling |
+| 3478–3497 | call relays: FaceTime, Teams, Zoom, Meet, Signal, WhatsApp, Messenger |
+| 8801–8810 | Zoom |
+| 10000 | Signal group calls |
+| 16384–16387, 16393–16402 | FaceTime |
+| 19302–19309 | Google Meet |
+
+Every safe-listed port is a small hole a game could use, so the list stays short:
+Viber's and Webex's ports, for example, sit inside game ranges and are left off.
+Instead, UDP to these destinations is never treated as gaming, on any port: the
+local network (private, link-local, multicast and broadcast addresses), the
+firewall's own addresses, so a VPN back home keeps working; Discord's own address
+block, 66.22.192.0/18, for its voice; and the messaging apps' own networks as the
+messaging data ships them, so their calls keep working whatever port they pick.
+
+The games listed by name are looked up every minute through the firewall's own
+resolver, like the messaging apps, and their addresses are kept for 7 days. An
+answer counts only when it is public and the name's own: a plain record, or one of
+the game's own Amazon load balancers. An answer through any other alias, such as a
+CDN that other sites share, is left alone.
+
+Everything else on the device keeps working: web and video, app stores and game
+downloads, notifications, chat and calls in the messaging apps, FaceTime, Zoom,
+Teams, Meet, Wi-Fi Calling and the local network. A new block also drops the
+device's open game connections, with "Drop existing connections" on, so a match in
+progress ends. No device is put in `NoGaming` until `Gaming_Exempt` holds the
+whole local set, so a failed or unfinished load cannot cut a device off its own
+network.
+
+### Gaming status
+
+The Status tab gains a **Gaming** column per device and a summary line built like
+messaging's: "Gaming: not in use", or "Gaming: N game-server entries · refreshed
+HH:MM", with any errors behind it and, in red, why gaming cannot be enforced. The
+status JSON carries a `gaming` key and per device `gaming`, `gaming_blocked` and
+`gaming_reason`.
+
 ## Addressing a device
 
 The **Address** field takes an IPv4 address, a CIDR, or a MAC address. It is a
@@ -385,6 +468,11 @@ Instagram, Messenger, Viber and KakaoTalk, with the services they take with them
 and press Apply if that is not wanted. A selection that was saved empty stays
 empty, and nothing else in the settings changes.
 
+## Upgrading from 0.2.0
+
+One install run is enough. Every device comes up with Gaming set to Not blocked,
+and nothing of gaming is made until a device uses it.
+
 ## Keeping it installed
 
 These files are not owned by a package, so a firmware upgrade can remove them.
@@ -413,14 +501,15 @@ would kill that script mid-run.
     /usr/local/opnsense/scripts/OPNsense/ParentalControl/uninstall.sh
 
 Removes everything the plugin added: the internet alias and its companion, the
-two messaging aliases, the three rules (internet, messaging and notification
-ports), the cron job, the three pf tables, the plugin's data directory
-(`/var/db/parentalcontrol`, which holds the learned server list) and the files.
+two messaging aliases, the five gaming aliases, the six rules (internet,
+messaging, notification ports, and gaming's UDP, TCP-port and game-server rules),
+the cron job, the six pf tables, the plugin's data directory
+(`/var/db/parentalcontrol`, which holds the learned server lists) and the files.
 Order matters: the tables are flushed and the rules deleted before the aliases they
 reference, so nothing is left blocked by an object that no longer has an owner.
 The tables themselves go last, once the reload has dropped the rules that used
-them, because pf keeps a table after a reload and would otherwise go on listing the
-three, empty, until the next reboot. Everything is matched by description marker,
+them, because pf keeps a table after a reload and would otherwise go on listing
+them, empty, until the next reboot. Everything is matched by description marker,
 so a renamed alias is still found. Safe to run repeatedly.
 
 **It refuses, and changes nothing, while anything else in the configuration refers
@@ -454,7 +543,7 @@ work afterwards, because the action file is one of the things it deletes; use th
 codeload bootstrap under Install to come back.
 
 Device settings stay in `config.xml`, so reinstalling restores them. Add
-`--purge` to remove those as well, the messaging settings included.
+`--purge` to remove those as well, the messaging and gaming settings included.
 
 The config-side cleanup is also available on its own as
 `configctl parentalcontrol uninstall` — useful to disable enforcement while
@@ -463,8 +552,9 @@ but not the files, the data directory or the marker. With the cron job gone noth
 syncs by itself, and while the plugin is enabled the Status tab shows the schedule
 cron as not installed. The next sync somebody starts (Apply,
 `configctl parentalcontrol sync`, or a flip of the dashboard widget's switch) puts
-the internet objects back, the cron job too while the plugin is enabled, and the
-messaging objects once a device uses messaging. Two things to know about it:
+the internet objects back, the cron job too while the plugin is enabled, the
+messaging objects once a device uses messaging, and the gaming objects once a
+device uses gaming. Two things to know about it:
 
 - When it refuses, configctl shows only "Execute error". Run `uninstall.sh` (or
   `uninstall.php`) directly to read why.
@@ -544,6 +634,40 @@ Blocking messaging is by server address, which sets its limits:
   sync is still running" (Apply shows only "failed"); the next per-minute sync
   applies it. Scheduled changes still go first in each run.
 
+Blocking gaming is by the kind of traffic games send, which sets its own limits:
+
+- IPv4 only, and nothing on mobile data or another network.
+- Not blocked: browser games and other games that play over ordinary web traffic,
+  apart from the ones listed by name; Minecraft Java servers on a port other than
+  25565; consoles, whose ports cover nearly all of UDP (the internet switch is the
+  tool for them); cloud-gaming services that stream through call relays or port
+  443; and Photon games and voice services that fall back to port 443.
+- HoYoLAB is not blocked: it runs entirely on shared CDNs, so only a DNS filter
+  can block it. Genshin Impact, Honkai: Star Rail and Zenless Zone Zero still open
+  and sign in, but cannot enter the game world. Cloud-streamed versions such as
+  Cloud Genshin may still work.
+- Minecraft Bedrock friend worlds and Xbox-world joins fall back to Microsoft's
+  call relays, which Teams also uses. Turn off multiplayer in the child's Microsoft
+  account (its Xbox privacy settings) instead.
+- Game Center multiplayer uses FaceTime's ports. Use Screen Time on the device
+  (Game Center, Multiplayer Games) instead.
+- A game server that happens to listen on a safe-listed port gets through: a few
+  ports out of each game's range, such as Zoom's 8801–8810 inside Rocket League's
+  7000–9000.
+- VPN apps that use UDP (WireGuard, OpenVPN) stop while gaming is blocked. IKEv2
+  and TCP 443 VPNs keep working, and a game played through them is not blocked.
+- Other apps that send UDP to ports outside the safe-list stop too while gaming is
+  blocked: a speed test's latency check, peer-to-peer apps, some softphones.
+- Calls lose their direct phone-to-phone path, which goes to random ports on the
+  other person's connection, and go through the app's relay servers instead, which
+  can lower quality. Snapchat, with neither published ports nor a network of its
+  own, relies on its relays answering on 3478.
+- Discord voice can fail on a server outside Discord's own address block.
+- A device connected to the home VPN reaches the firewall from its tunnel address,
+  not its home address. Add the tunnel address as its own device with the same
+  settings to cover it. This holds for the internet and messaging switches too.
+- The game hosts and ports are only as current as the installed plugin version.
+
 ## What has been verified, and what has not
 
 **Release 0.0.2** (the whole-internet block) was verified by observation against a
@@ -555,10 +679,10 @@ renaming the alias in both directions, confirming the aliases rename in place, t
 rule follows, the old pf table is flushed, no duplicate pair appears and
 enforcement never lapses.
 
-**Tests.** Six test files, which need no OPNsense and no network, only PHP 8.1 or
+**Tests.** Nine test files, which need no OPNsense and no network, only PHP 8.1 or
 later (with its dom, ctype, filter and SimpleXML extensions) and Python 3:
 
-    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; python3 -I tests/BuildMessagingDataTest.py
+    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; php tests/GamingTest.php; php tests/GamingDataTest.php; python3 -I tests/BuildMessagingDataTest.py; python3 -I tests/CheckGamingHostsTest.py
 
 Each prints a line per check and exits 1 when one fails. All pass, re-run on
 2026-10-19:
@@ -566,11 +690,14 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | File | Checks | What it covers |
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
-| `tests/MessagingTest.php` | 167 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/MessagingTest.php` | 173 | the messaging decision, the IPv4 helpers, the one check every range passes before a table, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/GamingTest.php` | 43 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, which DNS answers of a game host may be blocked, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
+| `tests/GamingDataTest.php` | 15 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, every range public and clear of the shared CDNs, and the settings model's Gaming field and alias-name rule |
+| `tests/CheckGamingHostsTest.py` | 6 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer |
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
-| `tests/FirewallTest.php` | 5 | loading a pf table: one pfctl call for the additions and one for the deletions, configd for each address when pfctl fails |
-| `tests/BuildMessagingDataTest.py` | 30 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and from Meta's per-site server names and checks them, that no address is in two apps' ranges, and its check of the protected names' owners |
+| `tests/FirewallTest.php` | 10 | loading a pf table: entries checked and put in pf's own form first, one pfctl call for the additions and one for the deletions, a failed call reported, and configd for each address only for a small change |
+| `tests/BuildMessagingDataTest.py` | 41 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and from Meta's per-site server names and checks them, that it stops behind a filtering or failing resolver and on a per-site list that shrank, that no address is in two apps' ranges, and its check of the protected names' owners |
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
@@ -587,43 +714,53 @@ was caught except seven in `MessagingTest.php`: five behave the same as the
 original on every input that can occur, and two fold the case of alias names,
 which the tests leave open on purpose. For 0.2.0, 33 more broken copies were all
 caught: 12 of the library, 8 of the generator, 10 of the data file, 2 of the
-migration and 1 of the table loading.
+migration and 1 of the table loading. A review of 0.2.0's last changes, before the
+gaming block built on them, led to the entry checks of the table loading, the one
+range check for every range, and the generator's stop on a filtering resolver, each
+shown failing first. For 0.3.0, 14 broken copies of `lib/gaming.php` were tried:
+one, at the top of the port range, was missed, and the check added for it catches
+it; the data file's checks were shown failing on broken copies of `gaming.json`.
 
-**Static analysis (0.2.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
+**Static analysis (0.3.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
 (9), over the plugin's scripts, library files, `controllers/` and model, its
 migration included, with OPNsense core 26.7.7's sources and the plugin's own
-library files and model on its scan path, reports 86 findings, none of them a
-defect:
+library files and model on its scan path, reports 89 findings, none of them a
+defect, and none in `lib/gaming.php`:
 
-- 67 are what it cannot follow in the framework: model fields reached through
-  `__get` and iterators typed as `mixed` (35), `Config::getInstance()` typed as
+- 74 are what it cannot follow in the framework: model fields reached through
+  `__get` and iterators typed as `mixed` (44), `Config::getInstance()` typed as
   plain `object` (6), Phalcon's view and core's own docblocks naming classes that
-  do not exist (10), core's `getModel()` documented as possibly null though it
-  never is (2), `config.inc` on PHP's include path (4), the API actions' JSON
+  do not exist (10), `config.inc` on PHP's include path (4), the API actions' JSON
   arrays having no declared value types (9), and the migration's `run()`
   parameter, which core's migration base class leaves untyped and an override may
   not narrow (1).
-- 18 are in `lib/serverlist.php`: the messaging data file and the state listing
-  that configd returns are decoded from JSON, which PHPStan types as `mixed`, so it
-  cannot check the calls that take their parts. The data file's shape is pinned by
-  `tests/MessagingDataTest.php`, a state row missing a key is ignored by
-  `selectStatesToDrop()`, and a damaged data file ends in the refresh's own error
-  handling, which Status shows, never in the internet block.
+- 14 are in `lib/serverlist.php`: the data files and the state listing that
+  configd returns are decoded from JSON, which PHPStan types as `mixed`, so it
+  cannot check the calls that take their parts. The data files' shapes are pinned
+  by `tests/MessagingDataTest.php` and `tests/GamingDataTest.php`, every range goes
+  through the one range check before a table, a state row missing a key is ignored
+  by `selectStatesToDrop()` and `selectGamingStates()`, and a damaged data file
+  ends in the refresh's own error handling, which Status shows, never in the
+  internet block.
 - 1 is in `lib/messaging.php`: `messagingHosts()` passes each app's host list
   through `array_values()`, which the list's declared type makes look redundant.
   The list comes from the same JSON, which is not checked entry by entry, and the
   apps' turns read it by position, so the call stays.
 
-0.1.0 had 84; the new ones are the migration's and `array_values()`'s.
+0.2.0 had 86.
 
 Semgrep 1.181.0, with its default, PHP, JavaScript, Python, secrets and
 security-audit rule sets, run over everything git tracks but the tests (which it
-skips), reports the same three findings as for 0.1.0:
+skips), reports five findings, none of them a defect:
 
 - `exec-use` on the `pfctl -k` call in `sync.php` that drops a blocked device's
   connections. Its argument goes through `escapeshellarg()` and can only be an
   address that passed the model's IPv4/CIDR/MAC mask or the ARP and lease
   parsing, and a network is skipped.
+- `exec-use` on the `proc_open()` in `lib/firewall.php` that loads a pf table.
+  It runs `/sbin/pfctl` with its arguments as a list, so no shell reads them; the
+  table name is one of the plugin's, and the addresses go in on stdin after each
+  has been checked to be an IPv4 address or network.
 - `unlink-use` in `uninstall.php`, on the shutdown function that removes the
   marker. Its argument is the constant path of the marker, never input.
 - `dynamic-urllib-use-detected` in `tools/build-messaging-data.py`. Every URL the
@@ -635,6 +772,12 @@ skips), reports the same three findings as for 0.1.0:
   `announced-prefixes`) and an address or an AS number; ARIN's,
   `https://whois.arin.net/rest/nets;name=<name>`, takes a network name from the
   sources file. It is a maintainer's tool and is never installed.
+- `dynamic-urllib-use-detected` in `tools/check-gaming-hosts.py`, likewise: its
+  two URLs are fixed `https` templates, Google's public DNS
+  (`https://dns.google/resolve?name=<host>&type=A`) and HackerTarget's reverse
+  lookup (`https://api.hackertarget.com/reverseiplookup/?q=<address>`), filled
+  with a host name from `gaming.json` or an address it resolved to. A maintainer's
+  tool, never installed.
 
 Semgrep's bash parser also cannot read `install.sh` in full (`sh -n` and `dash -n`
 are clean on every script). Every function, API action, configd action and
@@ -656,7 +799,9 @@ were left alone. The Settings tab's Apply ran in headless Chrome with core 26.7.
 own jQuery, Bootstrap, token field and form scripts and a stubbed API: it saves
 changed settings before applying, saves nothing when they did not change or have
 not loaded yet, and on a validation error applies nothing and brings up the tab.
-Those harnesses are scratch tools and not in the repository. They show that the
+For 0.3.0 the page's Gaming columns and summary ran the same way, in use and out of
+use, with the messaging summary unchanged. Those harnesses are scratch tools and
+not in the repository. They show that the
 logic does what it should, not that OPNsense agrees.
 
 **On OPNsense.** 0.1.0 was installed on a live OPNsense 26.7.7 firewall from its
@@ -694,7 +839,14 @@ table, uninstalls with and without `--purge`, and compares `config.xml` with the
 saved copy); and the rest of the device checklist: back to Not blocked, the
 schedule, an empty app selection, Messenger's first sign-in with only WhatsApp
 selected, a reboot, the status page, the uninstall rehearsal, and the apps the test
-phone does not have. Their results are added here when they exist.
+phone does not have. For 0.3.0, the virtual machine run's gaming section (a device
+saved without the field, nothing made before first use, a user's alias under a
+gaming name, every object in one sync, the port aliases, the never-blocked and
+game-server tables, dropping a connection to a game server, the schedule, and the
+uninstall of the gaming objects) and the gaming device checklist
+(`docs/testing/gaming-block.md`): games blocked, and calls, Wi-Fi Calling, web,
+notifications and the home VPN still working. Their results are added here when
+they exist.
 
 **Not implemented:** IPv6 blocking — see Requirements below.
 
@@ -777,6 +929,19 @@ moment once more, prints how many names of each template answered, and stops on 
 answer no public server has (0.0.0.0, a private address) and on a per-site list
 more than a tenth shorter than the committed one. When sites really have closed,
 `--accept-drop` writes the shorter list.
+
+**Before each release, check the game hosts.** Every address a host in
+`gaming.json` resolves to is blocked for devices denied gaming, so each must still
+be the game's own:
+
+    python3 -I tools/check-gaming-hosts.py --passive-dns
+
+resolves each host through Google's public DNS and fails one that answers through
+an alias other than the game's own load balancers, with an address in the shared
+CDN ranges or one no public server has, or not at all; `--passive-dns` also fails
+one whose addresses carry other sites' names (HackerTarget's free lookup allows a
+few dozen a day). A failing host comes out of the list, or the game is caught some
+other way, before the release.
 
 **Before each release, check for a newer Microsoft WNS file.** The generator pins
 one dated file, `WNSPublicIPs_<date>.xml`, in `tools/messaging-sources.json`
