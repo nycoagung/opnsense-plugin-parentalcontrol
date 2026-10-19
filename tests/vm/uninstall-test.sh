@@ -308,7 +308,7 @@ $a = array_slice($argv, 2);
 
 /* the firewall's classes, loaded the way sync.php loads them; config.inc also
    sets the firewall's timezone, which sync.php's schedule uses too */
-if (in_array($cmd, ['general', 'add', 'set', 'del', 'window', 'alias-ok', 'rule-add', 'rule-del'], true)) {
+if (in_array($cmd, ['general', 'add', 'set', 'del', 'window', 'alias-ok', 'rule-add', 'rule-del', 'model-version'], true)) {
     require_once('config.inc');
 }
 
@@ -416,6 +416,24 @@ switch ($cmd) {
             exit(1);
         }
         save($flt);
+        break;
+    case 'model-version':       /* model-version [VERSION]: prints the settings' stored version, then stores VERSION ("" for none) */
+        $cfg = \OPNsense\Core\Config::getInstance();
+        if (!isset($cfg->object()->OPNsense->ParentalControl)) {
+            fwrite(STDERR, "no Parental Control settings in config.xml\n");
+            exit(1);
+        }
+        $node = $cfg->object()->OPNsense->ParentalControl;
+        echo (string)$node['version'], "\n";
+        if (!isset($a[0])) {
+            break;
+        }
+        if ($a[0] === '') {
+            unset($node['version']);
+        } else {
+            $node['version'] = $a[0];
+        }
+        $cfg->save();
         break;
     case 'jget':                /* jget PATH: one value of the JSON on stdin, as JSON; PATH as a.0.b */
         $value = json_decode((string)stream_get_contents(STDIN), true);
@@ -682,6 +700,34 @@ verdict "enforced: status says vm-test is denied messaging"
 [ "$(sget messaging.error)" = null ] || problem "error: $(sget messaging.error)"
 case $(sget messaging.refreshed_at) in ''|*[!0-9]*) problem "refreshed_at: $(sget messaging.refreshed_at)" ;; esac
 verdict "enforced: status in use, refreshed, no error (lookups ran through the VM's resolver)"
+
+EIGHT=facebook_instagram,kakaotalk,line,signal,snapchat,telegram,viber,whatsapp
+apps0=$(sget messaging.apps | tr -d '[]"')
+[ "$apps0" = "$EIGHT" ] || problem "apps: $apps0"
+verdict "settings: eight apps selected by default"
+# An upgrade from 0.1.0, whose settings are version 1.1.0, migrated the way
+# install.sh has core do it. Saved selections are put back afterwards, with the
+# stored version.
+migrated() {                # migrated SAVED: the selection SAVED becomes, as status lists it
+    $PC general messaging_apps "$1" > /dev/null 2>&1 || { echo "not saved"; return; }
+    $PC model-version 1.1.0 > /dev/null 2>&1 || { echo "version not stored"; return; }
+    _out=$(/usr/local/opnsense/mvc/script/run_migrations.php OPNsense/ParentalControl 2>&1)
+    printf '%s' "$_out" | grep -qF 'ParentalControl from 1.1.0 to 1.2.0' ||
+        { echo "not migrated: $(oneline "$_out")"; return; }
+    configctl parentalcontrol status 2>&1 | $PC jget messaging.apps | tr -d '[]"'
+}
+calm
+if v0=$($PC model-version 2>&1); then
+    got=$(migrated line,signal,snapchat,telegram,whatsapp)
+    [ "$got" = "$EIGHT" ] || problem "the five 0.1.0 apps became: $got"
+    got=$(migrated '')
+    [ -z "$got" ] || problem "an empty selection became: $got"
+    $PC general messaging_apps "$apps0" > /dev/null 2>&1 || problem "selection not put back"
+    $PC model-version "$v0" > /dev/null 2>&1 || problem "version not put back"
+else
+    problem "version: $(oneline "$v0")"
+fi
+verdict "settings: the upgrade adds the new apps to a saved selection, an empty one stays empty"
 
 # Two more syncs. pfctl lists a /32 bare; a list compared as written would delete
 # every WNS /32 on one run and add it back on the next. A newly learned address

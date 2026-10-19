@@ -13,24 +13,26 @@ note what happened instead. Placeholders:
 - `<other-device-ip>`: a second device that stays unblocked; an Apple device, so
   that it can send iMessage and FaceTime
 - `<window-end>` and `<window-start>`: times a few minutes from now, as HH:MM
+- `<branch>`: the branch being tested
 
 Commands are run on the firewall's console (menu option 8) or over SSH. Each one
 works in the default root shell (csh) as well as in sh.
 
 ## 1 Install the branch build
 
-Bootstrap from codeload with the branch as the ref (`GH_REF=messaging-block`):
+Bootstrap from codeload with the branch as the ref (`GH_REF=<branch>`):
 
-    fetch -qo /tmp/pc.tgz https://codeload.github.com/nycoagung/opnsense-plugin-parentalcontrol/tar.gz/refs/heads/messaging-block && rm -rf /tmp/pcx && mkdir -p /tmp/pcx && tar -xzf /tmp/pc.tgz -C /tmp/pcx && sh /tmp/pcx/opnsense-plugin-parentalcontrol-messaging-block/install.sh
+    fetch -qo /tmp/pc.tgz https://codeload.github.com/nycoagung/opnsense-plugin-parentalcontrol/tar.gz/refs/heads/<branch> && rm -rf /tmp/pcx && mkdir -p /tmp/pcx && tar -xzf /tmp/pc.tgz -C /tmp/pcx && sh /tmp/pcx/opnsense-plugin-parentalcontrol-<branch>/install.sh
 
 If the plugin is already installed, its own installer can fetch the branch instead:
 
-    env GH_REF=messaging-block sh /usr/local/opnsense/scripts/OPNsense/ParentalControl/install.sh
+    env GH_REF=<branch> sh /usr/local/opnsense/scripts/OPNsense/ParentalControl/install.sh
 
 On a firewall that still runs 0.0.2, run that line twice. The first run is 0.0.2's
 installer, which copies only 0.0.2's files: every sync then fails until the second
-run, made by the new installer, completes the install. The bootstrap line above
-needs only one run.
+run, made by the new installer, completes the install. From 0.1.0 on, one run is
+enough: the installed copy hands over to the installer it downloads. The bootstrap
+line above needs only one run.
 
 `configctl parentalcontrol install` cannot do this: it always fetches `main`.
 
@@ -44,8 +46,13 @@ needs only one run.
       choices: Not blocked, Blocked, Blocked outside allowed hours.
 - [ ] Its help text says that blocking also stops every notification on the device,
       including iMessage and incoming FaceTime calls.
-- [ ] Settings tab: **Messaging apps to block** is a token field holding LINE,
-      Signal, Snapchat, Telegram and WhatsApp.
+- [ ] Settings tab: **Messaging apps to block** is a token field holding all eight
+      apps: Facebook & Instagram, KakaoTalk, LINE, Signal, Snapchat, Telegram,
+      Viber and WhatsApp. After an upgrade from 0.1.0 it holds the apps saved
+      before plus the three new ones; a field that was saved empty stays empty.
+- [ ] Its help text says that Facebook & Instagram blocks the whole Facebook,
+      Instagram and Messenger apps, and that KakaoTalk also blocks other Kakao
+      services.
 - [ ] Status tab: a **Messaging** column for each device, with a badge and the
       reason.
 - [ ] With no enabled device using messaging, the summary line says
@@ -53,10 +60,10 @@ needs only one run.
 
 ## 3 Block the test device
 
-1. On the test device, open a chat in each of the five apps and leave it open. In
-   one of them, say WhatsApp, start a voice call with the second device and keep it
-   going through Apply.
-2. Under Settings, keep all five apps selected and press Save.
+1. On the test device, open a chat in each app on the list that it has, and leave
+   it open. In one of them, say WhatsApp, start a voice call with the second device
+   and keep it going through Apply.
+2. Under Settings, keep all eight apps selected and press Save.
 3. Under Devices, edit the device at `<device-ip>`. Set Mode to Always allowed, so
    that its internet schedule cannot cut everything and make a check pass or fail
    for the wrong reason. Set Messaging to Blocked, save, then press Apply.
@@ -89,6 +96,28 @@ the default.
 - [ ] The call started in section 3: note whether its audio stopped at once when
       Apply cut messaging, or only after a few seconds (how many).
 
+### Viber
+
+- [ ] Sending and receiving fail, and an open chat stops updating.
+- [ ] Calls: note whether a voice or video call still connects, and whether its
+      sound passes. Viber's call relays could not all be identified, so a call may
+      still connect; that is a known limit.
+
+### KakaoTalk
+
+- [ ] Sending and receiving fail, and an open chat stops updating.
+- [ ] Voice and video calls fail.
+- [ ] Daum and Kakao Map fail too. That is expected: they run on Kakao's own
+      networks, which the block covers.
+
+### Facebook & Instagram
+
+- [ ] The Facebook app's feed does not load.
+- [ ] Messenger: sending, receiving and calls fail.
+- [ ] Instagram: the feed does not load, and direct messages fail.
+- [ ] Threads does not load. That is expected: it runs on Instagram's servers.
+- [ ] In a browser, facebook.com, messenger.com and instagram.com do not load.
+
 ## 5 Notifications on the blocked device
 
 - [ ] No notification of any kind arrives. Send test messages from the second device
@@ -106,9 +135,6 @@ the default.
 - [ ] iCloud, such as Photos syncing
 - [ ] The app store (App Store or Google Play): browse and download an app
 - [ ] Microsoft Teams: a chat and a call
-- [ ] Facebook
-- [ ] Instagram, including its direct messages
-- [ ] Instagram's images and videos still load while WhatsApp is blocked
 
 ## 7 Other devices
 
@@ -150,7 +176,30 @@ With the test device set to Blocked:
       it is not refilled with the default apps.
 - [ ] With no app selected, the apps work on the blocked device, but its
       notifications are still cut.
-- [ ] Select all five apps again, press Save, then Apply.
+
+### Only Facebook & Instagram selected
+
+Select only Facebook & Instagram, press Save, then Apply.
+
+- [ ] WhatsApp works: messages and calls.
+- [ ] Facebook, Instagram and Messenger stay blocked.
+
+### Only WhatsApp selected
+
+Select only WhatsApp, press Save, then Apply.
+
+- [ ] Facebook works.
+- [ ] Instagram works, including its direct messages, and its images and videos
+      load.
+- [ ] Messenger works: messages and calls.
+- [ ] Messenger signs in for the first time: sign out of Messenger, or install it
+      fresh, then sign in and open a chat. Its one-time setup of encrypted chats
+      may use a WhatsApp server; note whether the sign-in and the chat work.
+- [ ] WhatsApp stays blocked.
+
+### All eight again
+
+- [ ] Select all eight apps again, press Save, then Apply.
 
 ## 11 Reboot
 
