@@ -10,7 +10,8 @@ balancer of the game's own). A host fails when it answers through any other alia
 public server has (FILTERED_ANSWERS, as the messaging data build uses), or not at
 all. --passive-dns also asks HackerTarget's reverse lookup which other names each
 address carries, and fails a host whose addresses also serve names outside the
-game's own domains, and a host whose lookup gets no list of names back, such as
+game's own domains (a provider's generic name for the address itself does not
+count), and a host whose lookup gets no list of names back, such as
 once the day's free lookups are used up. Answers come from Google's public DNS, so
 a local DNS filter cannot hide anything.
 
@@ -22,6 +23,7 @@ import argparse
 import importlib.util
 import ipaddress
 import json
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -95,6 +97,15 @@ def other_names(ip):
     return names
 
 
+def names_the_address(name, ip):
+    """Whether name is a provider's generic name for ip itself, which names no site:
+    Google Cloud's reversed n.n.n.n.bc.googleusercontent.com, or AWS's
+    ec2-n-n-n-n.<region>.compute.amazonaws.com."""
+    octets = ip.split('.')
+    return any(re.search(r'(?<![0-9])' + re.escape(sep.join(order)) + r'(?![0-9])', name)
+               for sep in '.-' for order in (octets, octets[::-1]))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Check the game hosts in gaming.json against live DNS.')
     parser.add_argument('--data', default=str(DATA), help='gaming.json to check')
@@ -119,6 +130,7 @@ def main(argv=None):
                         continue
                     strangers = [n for n in seen
                                  if not any(n == d or n.endswith('.' + d) for d in domains)
+                                 and not names_the_address(n, ip)
                                  and not n.endswith(tuple(suffixes))]
                     if strangers:
                         found.append(f'{ip} also carries {", ".join(strangers[:5])}')

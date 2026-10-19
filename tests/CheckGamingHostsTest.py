@@ -83,18 +83,40 @@ class OtherNames(unittest.TestCase):
 
 
 class Main(unittest.TestCase):
-    def test_passive_dns_quota_fails_the_check(self):
+    def run_passive(self, reply):
+        """main() with --passive-dns on one host answering 203.0.113.5, and HackerTarget
+        answering reply: (exit code, output)."""
         with tempfile.TemporaryDirectory() as d:
             data, messaging = Path(d, 'gaming.json'), Path(d, 'messaging.json')
             data.write_text(json.dumps({'alias_suffixes': SUFFIXES,
                                         'servers': {'game': {'hosts': ['play.game.example']}}}))
             messaging.write_text(json.dumps({'shared_cdn_ranges': []}))
             with mock.patch.object(tool, 'resolve', return_value=([], ['203.0.113.5'])), \
-                    mock.patch.object(tool, 'fetch', return_value=QUOTA), \
+                    mock.patch.object(tool, 'fetch', return_value=reply), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 rc = tool.main(['--data', str(data), '--messaging', str(messaging), '--passive-dns'])
+        return rc, out.getvalue()
+
+    def test_passive_dns_quota_fails_the_check(self):
+        rc, out = self.run_passive(QUOTA)
         self.assertEqual(rc, 1)
-        self.assertIn('passive DNS lookup of 203.0.113.5 failed', out.getvalue())
+        self.assertIn('passive DNS lookup of 203.0.113.5 failed', out)
+
+    def test_another_site_on_the_address_fails(self):
+        rc, out = self.run_passive('shop.example\n')
+        self.assertEqual(rc, 1)
+        self.assertIn('also carries shop.example', out)
+
+    def test_a_clouds_own_name_for_the_address_passes(self):
+        """Google Cloud names every address n.n.n.n.bc.googleusercontent.com, reversed,
+        and AWS ec2-n-n-n-n...amazonaws.com: names of the address, not other sites."""
+        for name in ('5.113.0.203.bc.googleusercontent.com', 'ec2-203-0-113-5.us-east-2.compute.amazonaws.com'):
+            with self.subTest(name=name):
+                self.assertEqual(self.run_passive(name + '\n')[0], 0)
+
+    def test_a_name_of_a_neighbouring_address_still_fails(self):
+        """55.113.0.203 holds 5.113.0.203 as text but is another address."""
+        self.assertEqual(self.run_passive('55.113.0.203.bc.googleusercontent.com\n')[0], 1)
 
 
 if __name__ == '__main__':
