@@ -43,7 +43,7 @@ Plugin Changelog
 * A game host's address is learned only when it is the name's own and public; an
   answer through a CDN is left alone
 * No device is blocked from gaming until the never-blocked table holds the whole
-  local network
+  local network, nor while a gaming alias is renamed by hand or missing
 * The Status tab and the status JSON show gaming per device and in a summary line
 * Table loads check every entry first and report a failed pfctl call, and only a
   small change falls back to configd address by address

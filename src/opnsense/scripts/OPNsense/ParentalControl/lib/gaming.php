@@ -130,6 +130,23 @@ function exemptReady(array $tableEntries): bool
 }
 
 /**
+ * Why no device may enter the gaming device table this run, or null when devices
+ * may. The objects must be as the plugin made them: core repoints the rules to an
+ * alias renamed by hand, and a renamed never-blocked alias starts out empty, while
+ * pf keeps the old table, full, under the fixed name that exemptReady() is given.
+ *
+ * @param ?string       $objectsProblem what is wrong with the gaming objects, or null
+ * @param array<string> $tableEntries   the never-blocked table as pf lists it
+ */
+function gamingRefusal(?string $objectsProblem, array $tableEntries): ?string
+{
+    if ($objectsProblem !== null) {
+        return "$objectsProblem; no device blocked this run";
+    }
+    return exemptReady($tableEntries) ? null : 'never-blocked table incomplete; no device blocked this run';
+}
+
+/**
  * The addresses in one game host's dns_get_record() answer that may be blocked.
  *
  * An answer counts when it is a plain record of the name asked, or comes through an

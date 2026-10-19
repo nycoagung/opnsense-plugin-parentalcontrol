@@ -64,8 +64,7 @@ internet alias itself cannot be named `NoMessaging` or `Messaging_Servers`.
 
 **Gaming adds three more tables, two port aliases and three more rules**, made the
 first time a device uses gaming (see Blocking gaming), found and named the same
-way as messaging's, with the same handling of a rename by hand or a name someone
-else's alias holds:
+way as messaging's, with the same handling of a name someone else's alias holds:
 
 - `NoGaming`, the devices currently denied gaming
 - `Gaming_Servers`, the addresses of the games listed by name
@@ -76,6 +75,12 @@ else's alias holds:
 - three floating rules blocking `NoGaming`: UDP to anything outside
   `Gaming_Exempt` on `Gaming_UDP_Ports`; TCP likewise on `Gaming_TCP_Ports`; and
   everything to `Gaming_Servers`
+
+A rename by hand stops gaming blocking altogether: while any of these has another
+name, or is missing, no device is put in `NoGaming`. A renamed `Gaming_Exempt`
+starts out empty, and the UDP rule would then block a device's local network too.
+The Status tab reports it, saying "gaming alias renamed" with the name the alias
+has and the name it should have.
 
 The rules only block, so they can never let through what another rule blocks. The
 internet alias cannot take any of these names either.
@@ -311,8 +316,8 @@ downloads, notifications, chat and calls in the messaging apps, FaceTime, Zoom,
 Teams, Meet, Wi-Fi Calling and the local network. A new block also drops the
 device's open game connections, with "Drop existing connections" on, so a match in
 progress ends. No device is put in `NoGaming` until `Gaming_Exempt` holds the
-whole local set, so a failed or unfinished load cannot cut a device off its own
-network.
+whole local set, and none while a gaming alias is renamed or missing, so a failed
+or unfinished load or a rename cannot cut a device off its own network.
 
 ### Gaming status
 
@@ -691,7 +696,7 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
 | `tests/MessagingTest.php` | 173 | the messaging decision, the IPv4 helpers, the one check every range passes before a table, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/GamingTest.php` | 43 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, which DNS answers of a game host may be blocked, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
+| `tests/GamingTest.php` | 46 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
 | `tests/GamingDataTest.php` | 15 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, every range public and clear of the shared CDNs, and the settings model's Gaming field and alias-name rule |
 | `tests/CheckGamingHostsTest.py` | 6 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer |
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
@@ -842,10 +847,11 @@ selected, a reboot, the status page, the uninstall rehearsal, and the apps the t
 phone does not have. For 0.3.0, the virtual machine run's gaming section (a device
 saved without the field, nothing made before first use, a user's alias under a
 gaming name, every object in one sync, the port aliases, the never-blocked and
-game-server tables, dropping a connection to a game server, the schedule, and the
-uninstall of the gaming objects) and the gaming device checklist
-(`docs/testing/gaming-block.md`): games blocked, and calls, Wi-Fi Calling, web,
-notifications and the home VPN still working. Their results are added here when
+game-server tables, `Gaming_Exempt` renamed by hand and back, dropping a
+connection to a game server, the schedule, and the uninstall of the gaming
+objects) and the gaming device checklist (`docs/testing/gaming-block.md`): games
+blocked, and calls, Wi-Fi Calling, web, notifications, the local network and the
+home VPN still working. Their results are added here when
 they exist.
 
 **Not implemented:** IPv6 blocking — see Requirements below.

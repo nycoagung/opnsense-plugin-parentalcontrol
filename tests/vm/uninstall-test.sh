@@ -202,6 +202,7 @@ HOLDER=                     # the current lock holder
 USH=                        # an uninstall.sh running in the background (8b)
 RULE=                       # the uuid of the test's own firewall rule while it exists
 FALIAS=                     # the uuid of the test's own alias while it exists (5b)
+GRENAME=                    # the name Gaming_Exempt has while the test has renamed it (5b)
 track()  { BG="$BG$1 "; }
 forget() { case $BG in *" $1 "*) BG="${BG%% "$1" *} ${BG#* "$1" }" ;; esac; }
 reap()   { wait "$1"; _rc=$?; forget "$1"; return "$_rc"; }
@@ -233,6 +234,9 @@ cleanup() {
     for _p in $BG; do stop "$_p"; done
     [ -z "$RULE" ] || $PC rule-del "$RULE" > /dev/null 2>&1
     [ -z "$FALIAS" ] || $PC alias-del "$FALIAS" > /dev/null 2>&1
+    if [ -n "$GRENAME" ] && $PC alias-rename "$GRENAME" Gaming_Exempt > /dev/null 2>&1; then
+        configctl filter reload > /dev/null 2>&1
+    fi
     if [ -f "$W/resolv.conf.orig" ]; then
         cp -p "$W/resolv.conf.orig" /etc/resolv.conf && rm -f "$W/resolv.conf.orig"
     fi
@@ -334,7 +338,7 @@ $a = array_slice($argv, 2);
 /* the firewall's classes, loaded the way sync.php loads them; config.inc also
    sets the firewall's timezone, which sync.php's schedule uses too */
 if (in_array($cmd, ['general', 'add', 'set', 'del', 'window', 'alias-ok', 'rule-add', 'rule-del', 'model-version',
-    'alias-add', 'alias-del', 'alias-content', 'strip-field'], true)) {
+    'alias-add', 'alias-del', 'alias-rename', 'alias-content', 'strip-field'], true)) {
     require_once('config.inc');
 }
 /* the plugin's own pure functions, for what the gaming checks expect */
@@ -473,6 +477,18 @@ switch ($cmd) {
         }
         save($als);
         break;
+    case 'alias-rename':        /* alias-rename OLD NEW: as the GUI renames an alias, repointing the rules that use it */
+        $als = new \OPNsense\Firewall\Alias();
+        foreach ($als->aliases->alias->iterateItems() as $item) {
+            if ($item->name->getValue() === $a[0]) {
+                $als->refactor($a[0], $a[1]);
+                $item->name = $a[1];
+                save($als);
+                exit(0);
+            }
+        }
+        fwrite(STDERR, "no alias {$a[0]}\n");
+        exit(1);
     case 'alias-content':       /* alias-content NAME: the alias's content as stored */
         foreach ((new \OPNsense\Firewall\Alias())->aliases->alias->iterateItems() as $item) {
             if ($item->name->getValue() === $a[0]) {
@@ -1078,6 +1094,31 @@ s=$(csync)
 [ "$s" = OK ] || problem "sync: $s"
 [ "$(md5 -q "$CONF")" = "$h0" ] || problem "config.xml changed"
 verdict "gaming: a sync with nothing to change saves nothing"
+
+# Gaming_Exempt renamed by hand: the rules now use a table that starts out empty,
+# while pf keeps the old one, full. A device left in NoGaming would lose its LAN.
+GRENAME=Gaming_Exempt_Renamed
+out=$($PC alias-rename Gaming_Exempt "$GRENAME" 2>&1) || { problem "rename: $(oneline "$out")"; GRENAME=; }
+configctl filter reload > /dev/null 2>&1
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+[ -z "$(tbl NoGaming)" ] || problem "NoGaming: $(tbl NoGaming | tr '\n' ' ')"
+ST=$(configctl parentalcontrol status 2>&1)
+case $(sget gaming.error) in
+    *"gaming alias renamed: $GRENAME should be Gaming_Exempt"*) ;;
+    *) problem "status error: $(sget gaming.error)" ;;
+esac
+verdict "gaming: with Gaming_Exempt renamed by hand no device is denied gaming, and status says why"
+if [ -n "$GRENAME" ]; then
+    out=$($PC alias-rename "$GRENAME" Gaming_Exempt 2>&1) || problem "rename back: $(oneline "$out")"
+    configctl filter reload > /dev/null 2>&1
+    pfctl -t "$GRENAME" -T kill > /dev/null 2>&1
+    GRENAME=
+fi
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+listed NoGaming "$DEV" || problem "NoGaming: $(tbl NoGaming | tr '\n' ' ')"
+verdict "gaming: renamed back, $DEV is denied gaming again"
 
 # A newly gaming-blocked device loses its connection to a game server, as for
 # messaging: the device is the VM itself, and the target the first game host in

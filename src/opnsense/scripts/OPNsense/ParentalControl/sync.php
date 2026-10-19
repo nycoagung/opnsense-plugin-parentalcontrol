@@ -1102,12 +1102,17 @@ if ($gameObjectsOk && $gameInUse && $gameData !== null) {
 }
 
 /* The device table, every run, in use or not, as for messaging, and never under a
-   conflict. No device enters it while the never-blocked table lacks any of the
-   local set: a failed or not yet loaded table must not cut a device off its LAN. */
+   conflict. No device enters it while a gaming object is missing or renamed, or the
+   never-blocked table lacks any of the local set (gamingRefusal()): a renamed,
+   failed or not yet loaded never-blocked table must not cut a device off its LAN. */
 if ($gameObjectsOk) {
     $gameWant = array_keys($gameBlockSet);
-    if ($gameWant !== [] && !exemptReady(tableContents($backend, GAME_EXEMPT_ALIAS))) {
-        $gameErrors[] = 'never-blocked table incomplete; no device blocked this run';
+    $refusal = $gameWant === [] ? null : gamingRefusal(
+        gamingObjectsProblem($aliasRows, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule')),
+        tableContents($backend, GAME_EXEMPT_ALIAS)
+    );
+    if ($refusal !== null) {
+        $gameErrors[] = $refusal;
         $gameWant = [];
     }
     $gameDiff = syncTable($backend, GAME_DEVICES_ALIAS, $gameWant, $addTo[GAME_DEVICES_ALIAS]);

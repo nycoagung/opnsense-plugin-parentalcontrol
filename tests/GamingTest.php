@@ -116,6 +116,18 @@ check('exempt ready: all of GAME_LOCAL listed', exemptReady(array_merge(['198.51
 check('exempt ready: one missing', exemptReady(array_slice($local, 1)), false);
 check('exempt ready: empty table', exemptReady([]), false);
 
+/* ---- refusal ----------------------------------------------------------------- */
+
+/* Gaming_Exempt renamed by hand: core repoints the rules to the new name, whose
+   table starts out empty, while pf keeps the old table, full, under the fixed name.
+   That full table must not let a device in, or the UDP rule blocks its LAN. */
+check('refusal: Gaming_Exempt renamed, the old table still full',
+    gamingRefusal('gaming alias renamed: Exempt2 should be Gaming_Exempt', $local),
+    'gaming alias renamed: Exempt2 should be Gaming_Exempt; no device blocked this run');
+check('refusal: objects as made, the local set present', gamingRefusal(null, $local), null);
+check('refusal: objects as made, the local set incomplete', gamingRefusal(null, array_slice($local, 1)),
+    'never-blocked table incomplete; no device blocked this run');
+
 /* ---- answers --------------------------------------------------------------- */
 
 $a = fn(string $host, string $ip): array => ['host' => $host, 'class' => 'IN', 'ttl' => 60, 'type' => 'A', 'ip' => $ip];
