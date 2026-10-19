@@ -1,8 +1,12 @@
 """Build messaging.json, the plugin's list of messaging and notification servers,
 or check the host names in it against live DNS.
 
-    python3 -I tools/build-messaging-data.py --out src/opnsense/scripts/OPNsense/ParentalControl/messaging.json [--wns FILE]
+    python3 -I tools/build-messaging-data.py --out src/opnsense/scripts/OPNsense/ParentalControl/messaging.json [--wns FILE] [--accept-drop]
     python3 -I tools/build-messaging-data.py --check
+
+Build through an unfiltered, unthrottled resolver: the per-site names alone are
+thousands of lookups, and a DNS filter or a resolver that limits queries would
+answer some of them wrongly or not at all.
 
 A maintainer's tool, never installed. The build reads the hand-maintained
 tools/messaging-sources.json and adds the lists it downloads:
@@ -35,8 +39,11 @@ tools/messaging-sources.json and adds the lists it downloads:
 
 A failed download, an entry that is not an address range, a WNS file without
 the element, a list that comes out empty, an app range that fails its checks,
-or a protected_owners entry whose name is not protected or whose owner is not
-an app stops the build with exit status 1 before anything is written.
+a protected_owners entry whose name is not protected or whose owner is not
+an app, a per-site answer no public server has (a filtering resolver), or a
+per-site list more than a tenth shorter than the current messaging.json's
+(unless --accept-drop says the drop is real) stops the build with exit status 1
+before anything is written. A lookup that fails for the moment is tried once more.
 
 protected_owners maps a protected host name to the app that owns it: the name
 protects its addresses only while that app is not selected, since a selected
@@ -86,6 +93,14 @@ SPECIAL_PURPOSE = [ipaddress.ip_network(n) for n in (
     '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
     '192.0.0.0/24', '192.0.2.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24',
     '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4')]
+# What a DNS filter answers for a name it blocks, and what no public server has: the
+# plugin's NON_PUBLIC_RANGES (lib/messaging.php). A per-site answer in one of them
+# means the build is behind a filter, which would quietly ship a shorter list.
+FILTERED_ANSWERS = [ipaddress.ip_network(n) for n in (
+    '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
+    '192.168.0.0/16', '224.0.0.0/4', '240.0.0.0/4')]
+# A per-site list this much shorter than the current messaging.json's stops the build.
+SITE_DROP = 0.9
 
 
 def fetch(url, headers=None):
@@ -184,16 +199,34 @@ def site_hosts(app, sites):
 def site_ranges(app_id, hosts, owned, resolve_hosts):
     """The answers of an app's per-site names that lie in its owner's networks, as
     /32 networks, each once; and the answers outside them, set aside. A name that
-    does not resolve is skipped: not every service runs at every site."""
+    does not resolve is skipped: not every service runs at every site. An answer no
+    public server has (FILTERED_ANSWERS) stops the build."""
     answers = resolve_hosts(hosts)
     inside, outside = set(), set()
-    for ip in (ip for host in hosts for ip in answers.get(host, [])):
-        addr = ipaddress.ip_address(ip)
-        (inside if any(addr in n for n in owned) else outside).add(addr)
+    for host in hosts:
+        for ip in answers.get(host, []):
+            addr = ipaddress.ip_address(ip)
+            if any(addr in n for n in FILTERED_ANSWERS):
+                raise ValueError(f'{app_id}: {host} answered {ip}, which no public server has; '
+                                 'build from an unfiltered resolver')
+            (inside if any(addr in n for n in owned) else outside).add(addr)
     if not inside:
         raise ValueError(f'{app_id}: none of its {len(hosts)} per-site names resolved inside the owner networks')
     return ([ipaddress.ip_network(f'{a}/32') for a in sorted(inside)],
             [str(a) for a in sorted(outside)])
+
+
+def check_site_counts(current, apps, accept_drop):
+    """Each app's per-site list against the current messaging.json's: one more than a
+    tenth shorter stops the build, unless the drop is accepted. A failing or
+    throttled resolver shortens a list more often than closing sites do, and both
+    look the same to the lookups."""
+    for app_id, app in apps.items():
+        old = len(current.get('apps', {}).get(app_id, {}).get('site_ranges', []))
+        new = len(app.get('site_ranges', []))
+        if old and new < old * SITE_DROP and not accept_drop:
+            raise ValueError(f'{app_id}: {new} per-site addresses, {old} in the current messaging.json; '
+                             'a resolver may have failed or filtered answers (--accept-drop if the drop is real)')
 
 
 def resolve_all(hosts):
@@ -240,7 +273,7 @@ def check_owners(owners, protected, app_ids):
             raise ValueError(f'protected_owners: {host}: {owner_app} is not an app')
 
 
-def build(wns_file):
+def build(wns_file, accept_drop=False):
     src = json.loads(SOURCES.read_text())
     notes = src['notifications']
     cdn = src['shared_cdn_sources']
@@ -269,10 +302,16 @@ def build(wns_file):
         hosts = site_hosts(app, meta['servers'] if meta else [])
         sites = []
         if hosts:
-            sites, outside = site_ranges(app_id, hosts, owned, resolve_all)
+            answers = resolve_all(hosts)
+            sites, outside = site_ranges(app_id, hosts, owned, lambda _, answers=answers: answers)
             if outside:
                 print(f'{app_id}: {len(outside)} per-site answers outside AS{meta["owner_asn"]} left out: '
                       + ' '.join(outside[:8]), file=sys.stderr)
+            # what each template found, so a shrinking service shows by name
+            for template in app['meta_site_hosts']:
+                names = [template.replace('{site}', s) for s in meta['servers']]
+                found = sum(1 for h in names if answers.get(h))
+                print(f'{app_id}: {template}: {found} of {len(names)} names answered', file=sys.stderr)
         check_app_ranges(app_id, ranges + extra + sites, shared, notify)
         apps[app_id] = {'label': app['label'], 'hosts': app['hosts'],
                         'ranges_url': app.get('ranges_url'), 'ranges': strs(ranges)}
@@ -282,6 +321,7 @@ def build(wns_file):
             apps[app_id]['site_ranges'] = strs(sites)
     check_disjoint({app_id: [ipaddress.ip_network(c) for c in app['ranges'] + app.get('extra_ranges', [])
                              + app.get('site_ranges', [])] for app_id, app in apps.items()})
+    check_site_counts(json.loads(DATA.read_text()) if DATA.exists() else {}, apps, accept_drop)
     return {
         'schema': 1,
         'generated': datetime.date.today().isoformat(),
@@ -310,12 +350,19 @@ def owner(ip):
     return f"{info['prefix']} {', '.join(names)}" if names else 'not announced'
 
 
-def resolve(host):
-    try:
-        found = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
-    except socket.gaierror:
-        return []
-    return sorted({f[4][0] for f in found}, key=ipaddress.ip_address)
+def resolve(host, lookup=socket.getaddrinfo):
+    """host's IPv4 answers, [] when it has none. A temporary failure is tried once
+    more, so a moment's trouble at the resolver does not drop a name from a list."""
+    retry = {socket.EAI_AGAIN, getattr(socket, 'EAI_FAIL', socket.EAI_AGAIN)}
+    for attempt in (1, 2):
+        try:
+            found = lookup(host, None, socket.AF_INET, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            if attempt == 1 and e.errno in retry:
+                continue
+            return []
+        return sorted({f[4][0] for f in found}, key=ipaddress.ip_address)
+    return []
 
 
 def check():
@@ -367,11 +414,13 @@ def main():
     mode.add_argument('--out', help='write messaging.json here')
     mode.add_argument('--check', action='store_true', help='resolve every host name and report what the guard keeps')
     parser.add_argument('--wns', help='a local copy of WNSPublicIPs_*.xml instead of the pinned download')
+    parser.add_argument('--accept-drop', action='store_true',
+                        help='write the file even when a per-site list is more than a tenth shorter than now')
     args = parser.parse_args()
     if args.check:
         check()
     else:
-        Path(args.out).write_text(json.dumps(build(args.wns), indent=2, sort_keys=True) + '\n')
+        Path(args.out).write_text(json.dumps(build(args.wns, args.accept_drop), indent=2, sort_keys=True) + '\n')
 
 
 if __name__ == '__main__':

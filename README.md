@@ -769,7 +769,13 @@ kind of server with `{site}` in place of the suffix. The list was taken on
 `-shv-NN-SITE` suffix of the kinds of server the templates name. Take it again
 from there, or from the reverse names of the servers the apps reach, so that new
 sites are blocked from the start. A build resolves about 20,000 names and takes a
-minute or two; stale suffixes simply do not resolve.
+minute or two; stale suffixes simply do not resolve. Build through an unfiltered,
+unthrottled resolver: a DNS filter, or one that limits queries per client, would
+answer some names wrongly or not at all. The build tries a lookup that fails for the
+moment once more, prints how many names of each template answered, and stops on an
+answer no public server has (0.0.0.0, a private address) and on a per-site list
+more than a tenth shorter than the committed one. When sites really have closed,
+`--accept-drop` writes the shorter list.
 
 **Before each release, check for a newer Microsoft WNS file.** The generator pins
 one dated file, `WNSPublicIPs_<date>.xml`, in `tools/messaging-sources.json`

@@ -176,6 +176,42 @@ check('sites: answers inside the owner networks become /32 ranges, each once; th
 check('sites: no answer inside the owner networks stops the build',
       error(gen.site_ranges, 'example', ['c.example', 'd.example'], [ipaddress.ip_network('198.51.100.0/24')], site_resolve),
       'example: none of its 2 per-site names resolved inside the owner networks')
+# a DNS filter answers a blocked name with 0.0.0.0 or a local address: a build behind
+# one would quietly ship a shorter list
+for blocked in ['0.0.0.0', '192.168.1.2', '10.0.0.1', '127.0.0.1']:
+    check(f'sites: a resolver answering {blocked} stops the build',
+          error(gen.site_ranges, 'example', ['a.example', 'e.example'], [ipaddress.ip_network('198.51.100.0/24')],
+                lambda hosts, ip=blocked: {'a.example': ['198.51.100.9'], 'e.example': [ip]}),
+          f'example: e.example answered {blocked}, which no public server has; build from an unfiltered resolver')
+# a list much shorter than the shipped one means a failing or throttled resolver
+# more often than closed sites
+current = {'apps': {'whatsapp': {'site_ranges': [f'198.51.100.{i}/32' for i in range(100)]}}}
+def sites_of(count):
+    return {'whatsapp': {'site_ranges': [f'198.51.100.{i}/32' for i in range(count)]}}
+check('sites: a list that shrinks by more than a tenth stops the build',
+      error(gen.check_site_counts, current, sites_of(89), False),
+      'whatsapp: 89 per-site addresses, 100 in the current messaging.json; a resolver may have failed or '
+      'filtered answers (--accept-drop if the drop is real)')
+check('sites: a tenth less passes', gen.check_site_counts(current, sites_of(90), False), None)
+check('sites: a larger drop passes when accepted', gen.check_site_counts(current, sites_of(10), True), None)
+check('sites: an app new to the data passes', gen.check_site_counts({'apps': {}}, sites_of(3), False), None)
+# a temporary failure is tried once more; a name that does not exist is not
+def lookup_of(errnos, answer):
+    calls = []
+    def lookup(host, *args):
+        calls.append(host)
+        if len(calls) <= len(errnos):
+            raise gen.socket.gaierror(errnos[len(calls) - 1], 'lookup failed')
+        return [(2, 1, 6, '', (answer, 0))]
+    return lookup, calls
+lookup, calls = lookup_of([gen.socket.EAI_AGAIN], '203.0.113.5')
+check('resolve: a temporary failure is tried once more', [gen.resolve('a.example', lookup), len(calls)],
+      [['203.0.113.5'], 2])
+lookup, calls = lookup_of([gen.socket.EAI_AGAIN, gen.socket.EAI_AGAIN], '203.0.113.5')
+check('resolve: a second temporary failure gives no answer', [gen.resolve('a.example', lookup), len(calls)], [[], 2])
+lookup, calls = lookup_of([gen.socket.EAI_NONAME], '203.0.113.5')
+check('resolve: a name that does not exist is not tried again', [gen.resolve('a.example', lookup), len(calls)],
+      [[], 1])
 check("apps: an address in two apps' ranges stops the build",
       error(gen.check_disjoint, {'a': [ipaddress.ip_network('198.51.100.7/32')], 'b': [ipaddress.ip_network('198.51.100.0/24')]}),
       'apps a and b both hold 198.51.100.7/32')
