@@ -844,6 +844,19 @@ That run found the two gaps fixed before this release: WhatsApp moving to its
 fallback chat name, and Meta's DNS sending the app to a server at a site on another
 continent, which led to blocking every Meta site.
 
+0.3.0 was installed on the same firewall from its branch, as an upgrade from
+0.2.0's, and an Android phone was denied gaming:
+
+- every existing device showed Gaming as Not blocked, and the first use made the
+  gaming objects in one sync, with `Gaming_Exempt` holding the local set and the
+  firewall's own addresses;
+- Clash of Clans and Pokémon GO failed to connect, and the game-port and
+  game-server rules counted the packets they dropped;
+- Monster Hunter Now kept playing: it plays entirely over HTTPS, so it is blocked
+  by its server's name, added after that run, and then it failed too;
+- the calls of the checklist's section 5 connected, and the UDP rule counted no
+  packet while they ran.
+
 **Still to come:** the run of `tests/vm/uninstall-test.sh` on a disposable OPNsense
 26.7 virtual machine (it saves `config.xml`, installs, exercises all three
 settings, checks that every app is selected by default, that the migration adds
@@ -857,10 +870,12 @@ saved without the field, nothing made before first use, a user's alias under a
 gaming name, every object in one sync, the port aliases, the never-blocked and
 game-server tables, `Gaming_Exempt` renamed by hand and back, dropping a
 connection to a game server, the schedule, and the uninstall of the gaming
-objects) and the gaming device checklist (`docs/testing/gaming-block.md`): games
-blocked, and calls, Wi-Fi Calling, web, notifications, the local network and the
-home VPN still working. Their results are added here when
-they exist.
+objects), and the rest of the gaming device checklist
+(`docs/testing/gaming-block.md`): a real-time game over UDP, the games listed after
+the device test (Whiteout Survival, Kingshot, eFootball, Last War, MONOPOLY GO!,
+Gossip Harbor and the casino games), web, notifications, the local network and the
+home VPN, back to Not blocked, the schedule, a reboot and the uninstall rehearsal.
+Their results are added here when they exist.
 
 **Not implemented:** IPv6 blocking — see Requirements below.
 
