@@ -196,8 +196,9 @@ filter, depending on nothing outside OPNsense core:
   list: Facebook's and Instagram's main names (`facebook.com`,
   `www.facebook.com`, `graph.facebook.com`, `edge-mqtt.facebook.com`,
   `www.instagram.com`, `i.instagram.com`) to Facebook & Instagram, and
-  `g.whatsapp.net`, `web.whatsapp.com` and `mmg.whatsapp.net` to WhatsApp. Such a
-  name is protected only while its app is not selected. So blocking WhatsApp alone
+  `g.whatsapp.net`, its fallback `g-fallback.whatsapp.net`, `web.whatsapp.com` and
+  `mmg.whatsapp.net` to WhatsApp. Such a name is protected only while its app is
+  not selected. So blocking WhatsApp alone
   cannot take Facebook or Instagram with it, blocking Facebook & Instagram alone
   cannot take WhatsApp with it, and selecting both blocks both. A protected name
   without an owner is protected whichever apps are selected.
@@ -466,7 +467,11 @@ Blocking messaging is by server address, which sets its limits:
 
 - IPv4 only, like the rest of the plugin (see Requirements).
 - WhatsApp may sometimes connect through addresses built into the app that its
-  names never resolve to.
+  names never resolve to. Its fallback chat name, which it moves to within a minute
+  or two once its main chat server is blocked, is on its list.
+- A DNS filter that blocks an app's names for a device, such as a Pi-hole group with
+  blocklists, makes some apps fall back to addresses built into them. The plugin
+  never sees those addresses in DNS, so it does not block them; Meta's apps do this.
 - A blocked app still works on mobile data, through a VPN app on the device, or on
   another network.
 - Apps move servers. A new server address is picked up on the first sync after it
@@ -528,7 +533,7 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
 | `tests/MessagingTest.php` | 162 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/MessagingDataTest.php` | 33 | `messaging.json`: no private range or shared-CDN range in it, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, Viber's and KakaoTalk's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
+| `tests/MessagingDataTest.php` | 34 | `messaging.json`: no private range or shared-CDN range in it, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, Viber's and KakaoTalk's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
 | `tests/BuildMessagingDataTest.py` | 21 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
 

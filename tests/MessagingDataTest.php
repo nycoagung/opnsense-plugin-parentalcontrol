@@ -115,8 +115,8 @@ check('owners: the six Meta names belong to facebook_instagram',
 /* so that selecting Facebook & Instagram can never take WhatsApp down */
 check('owners: WhatsApp\'s own names are protected and belong to whatsapp',
     array_map(fn(string $h): array => [in_array($h, $protectedHosts, true), $owners[$h] ?? null],
-        ['g.whatsapp.net', 'web.whatsapp.com', 'mmg.whatsapp.net']),
-    array_fill(0, 3, [true, 'whatsapp']));
+        ['g.whatsapp.net', 'g-fallback.whatsapp.net', 'web.whatsapp.com', 'mmg.whatsapp.net']),
+    array_fill(0, 4, [true, 'whatsapp']));
 
 /* the design's own examples of names that must stay reachable: without them, an app
    address shared with Facebook or Instagram would be blocked, and nothing would say so */
@@ -143,6 +143,14 @@ check('whatsapp: edge names e1-e16 are listed',
         array_map(fn(int $i): string => "e$i.whatsapp.net", range(1, 16)),
         $apps['whatsapp']['hosts'] ?? [])),
     []);
+/* once its main chat address is blocked, WhatsApp moves to its fallback chat name within
+   a minute or two, so that name is looked up right after the main one; the app also
+   asks for api.whatsapp.net all the time */
+check('whatsapp: the fallback chat name follows the main one, and the API name is listed',
+    [array_search('g.whatsapp.net', $apps['whatsapp']['hosts'] ?? [], true),
+     array_search('g-fallback.whatsapp.net', $apps['whatsapp']['hosts'] ?? [], true),
+     in_array('api.whatsapp.net', $apps['whatsapp']['hosts'] ?? [], true)],
+    [0, 1, true]);
 
 /* Apple support article 102266 */
 $apple = $notes['apple_ranges'] ?? [];

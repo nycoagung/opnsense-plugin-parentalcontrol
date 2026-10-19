@@ -15,6 +15,11 @@ note what happened instead. Placeholders:
 - `<window-end>` and `<window-start>`: times a few minutes from now, as HH:MM
 - `<branch>`: the branch being tested
 
+Take the test device out of any DNS filtering first, such as a Pi-hole group with
+blocklists. An app whose names do not resolve falls back to addresses built into it,
+which the plugin never sees, so the results would describe the filter, not the
+plugin.
+
 Commands are run on the firewall's console (menu option 8) or over SSH. Each one
 works in the default root shell (csh) as well as in sh.
 
@@ -100,6 +105,9 @@ the default.
 
 - [ ] The call started in section 3: note whether its audio stopped at once when
       Apply cut messaging, or only after a few seconds (how many).
+- [ ] Five minutes later, WhatsApp still cannot send or receive. Once its main chat
+      server is blocked it moves to a fallback within a minute or two, so a check
+      made at once proves less.
 
 ### Viber
 

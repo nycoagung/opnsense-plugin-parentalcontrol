@@ -183,7 +183,9 @@
     "whatsapp": {
       "hosts": [
         "g.whatsapp.net",
+        "g-fallback.whatsapp.net",
         "mmg.whatsapp.net",
+        "api.whatsapp.net",
         "pps.whatsapp.net",
         "static.whatsapp.net",
         "v.whatsapp.net",
@@ -277,6 +279,7 @@
     "www.instagram.com",
     "i.instagram.com",
     "g.whatsapp.net",
+    "g-fallback.whatsapp.net",
     "web.whatsapp.com",
     "mmg.whatsapp.net",
     "www.apple.com",
@@ -299,6 +302,7 @@
   "protected_owners": {
     "edge-mqtt.facebook.com": "facebook_instagram",
     "facebook.com": "facebook_instagram",
+    "g-fallback.whatsapp.net": "whatsapp",
     "g.whatsapp.net": "whatsapp",
     "graph.facebook.com": "facebook_instagram",
     "i.instagram.com": "facebook_instagram",

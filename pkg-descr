@@ -39,6 +39,8 @@ Plugin Changelog
 * A downloaded range that reaches into private, local, carrier-grade NAT or
   multicast address space is ignored, and the data generator refuses an app
   range that reaches into any special-purpose block
+* WhatsApp's fallback chat name is blocked too: once its main chat server is
+  blocked, WhatsApp moves to it within a minute or two
 
 0.1.0
 

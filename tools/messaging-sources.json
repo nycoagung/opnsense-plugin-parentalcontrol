@@ -23,8 +23,9 @@
     "whatsapp": {
       "label": "WhatsApp",
       "hosts": [
-        "g.whatsapp.net", "mmg.whatsapp.net", "pps.whatsapp.net", "static.whatsapp.net",
-        "v.whatsapp.net", "web.whatsapp.com", "whatsapp.com", "whatsapp.net", "wa.me",
+        "g.whatsapp.net", "g-fallback.whatsapp.net", "mmg.whatsapp.net", "api.whatsapp.net",
+        "pps.whatsapp.net", "static.whatsapp.net", "v.whatsapp.net", "web.whatsapp.com",
+        "whatsapp.com", "whatsapp.net", "wa.me",
         "e1.whatsapp.net", "e2.whatsapp.net", "e3.whatsapp.net", "e4.whatsapp.net",
         "e5.whatsapp.net", "e6.whatsapp.net", "e7.whatsapp.net", "e8.whatsapp.net",
         "e9.whatsapp.net", "e10.whatsapp.net", "e11.whatsapp.net", "e12.whatsapp.net",
@@ -69,7 +70,7 @@
   "protected_hosts": [
     "facebook.com", "www.facebook.com", "graph.facebook.com", "edge-mqtt.facebook.com",
     "www.instagram.com", "i.instagram.com",
-    "g.whatsapp.net", "web.whatsapp.com", "mmg.whatsapp.net",
+    "g.whatsapp.net", "g-fallback.whatsapp.net", "web.whatsapp.com", "mmg.whatsapp.net",
     "www.apple.com", "www.icloud.com", "gateway.icloud.com", "setup.icloud.com",
     "www.google.com", "www.youtube.com", "www.googleapis.com", "play.googleapis.com",
     "android.clients.google.com", "classroom.google.com", "connectivitycheck.gstatic.com",
@@ -80,7 +81,8 @@
     "facebook.com": "facebook_instagram", "www.facebook.com": "facebook_instagram",
     "graph.facebook.com": "facebook_instagram", "edge-mqtt.facebook.com": "facebook_instagram",
     "www.instagram.com": "facebook_instagram", "i.instagram.com": "facebook_instagram",
-    "g.whatsapp.net": "whatsapp", "web.whatsapp.com": "whatsapp", "mmg.whatsapp.net": "whatsapp"
+    "g.whatsapp.net": "whatsapp", "g-fallback.whatsapp.net": "whatsapp",
+    "web.whatsapp.com": "whatsapp", "mmg.whatsapp.net": "whatsapp"
   },
   "notifications": {
     "apple_ranges": ["17.249.0.0/16", "17.252.0.0/16", "17.57.144.0/22", "17.188.128.0/18", "17.188.20.0/23"],
