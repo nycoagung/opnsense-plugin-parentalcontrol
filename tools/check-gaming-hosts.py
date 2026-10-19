@@ -8,7 +8,9 @@ plain A records, or an alias ending in one of gaming.json's alias_suffixes (a lo
 balancer of the game's own). A host fails when it answers through any other alias
 (a CDN's), with an address in messaging.json's shared CDN ranges, with an address no
 public server has (FILTERED_ANSWERS, as the messaging data build uses), or not at
-all. --passive-dns also asks HackerTarget's reverse lookup which other names each
+all. A proxy host (proxy_hosts) is reached through a provider's proxy that gives
+that one name an address of its own, so it only has to answer with public
+addresses. --passive-dns also asks HackerTarget's reverse lookup which other names each
 address carries, and fails a host whose addresses also serve names outside the
 game's own domains (a provider's generic name for the address itself does not
 count), and a host whose lookup gets no list of names back, such as
@@ -117,10 +119,14 @@ def main(argv=None):
     suffixes = data['alias_suffixes']
     failing = 0
     for game, server in data['servers'].items():
-        domains = {'.'.join(h.split('.')[-2:]) for h in server.get('hosts', [])}
-        for host in server.get('hosts', []):
+        proxies = server.get('proxy_hosts', [])
+        domains = {'.'.join(h.split('.')[-2:]) for h in server.get('hosts', []) + proxies}
+        for host in server.get('hosts', []) + proxies:
             chain, addresses = resolve(host)
-            found = problems(host, chain, addresses, suffixes, cdn)
+            # a proxy host's answer may come through any alias and from a shared CDN's
+            # range: the provider gives that one name an address of its own
+            found = (problems(host, chain, addresses, [''], []) if host in proxies
+                     else problems(host, chain, addresses, suffixes, cdn))
             if args.passive_dns:
                 for ip in addresses:
                     try:

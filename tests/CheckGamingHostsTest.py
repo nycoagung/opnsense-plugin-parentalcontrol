@@ -119,5 +119,30 @@ class Main(unittest.TestCase):
         self.assertEqual(self.run_passive('55.113.0.203.bc.googleusercontent.com\n')[0], 1)
 
 
+class ProxyHosts(unittest.TestCase):
+    """A proxy host answers through its provider's proxy, which gives that one name an
+    address of its own: its answer passes the alias and shared-CDN rules, and must still
+    be public."""
+
+    def run_proxy(self, chain, addresses):
+        with tempfile.TemporaryDirectory() as d:
+            data, messaging = Path(d, 'gaming.json'), Path(d, 'messaging.json')
+            data.write_text(json.dumps({'alias_suffixes': SUFFIXES, 'servers': {
+                'game': {'hosts': [], 'proxy_hosts': ['gate.game.example']}}}))
+            messaging.write_text(json.dumps({'shared_cdn_ranges': ['198.51.100.0/24']}))
+            with mock.patch.object(tool, 'resolve', return_value=(chain, addresses)), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                rc = tool.main(['--data', str(data), '--messaging', str(messaging)])
+        return rc, out.getvalue()
+
+    def test_answer_through_a_proxy_in_a_cdn_range_passes(self):
+        rc, out = self.run_proxy(['x.pacloudflare.example'], ['198.51.100.7'])
+        self.assertEqual(rc, 0)
+        self.assertIn('gate.game.example', out)
+
+    def test_non_public_answer_still_fails(self):
+        self.assertEqual(self.run_proxy(['x.pacloudflare.example'], ['10.0.0.7'])[0], 1)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -267,9 +267,10 @@ function dropMessagingStates(Backend $backend, array $targets, array $added, arr
  *
  * Resolves gaming.json's game hosts, keeping only the answers that are the hosts'
  * own (plainAnswers()) and not on a shared CDN; learns them for a week, as the
- * messaging list does, since a game's load balancers change address; and makes the
- * table hold them and the games' shipped ranges, each through acceptRange(). A
- * failed lookup never empties the list.
+ * messaging list does, since a game's load balancers change address; adds each proxy
+ * host's public answer, kept by name for a week (gameHosts()); and makes the table
+ * hold them and the games' shipped ranges, each through acceptRange(). A failed
+ * lookup never empties the list.
  *
  * @param array<string, mixed> $gaming    gaming.json
  * @param array<string>        $cdnRanges messaging.json's shared_cdn_ranges; [] when it is unreadable
@@ -283,20 +284,28 @@ function refreshGamingServers(Backend $backend, string $table, array $gaming, ar
 {
     putenv('RES_OPTIONS=timeout:1 attempts:1');
     $suffixes = array_values(array_filter((array)($gaming['alias_suffixes'] ?? []), 'is_string'));
-    $lookup = function (string $host) use ($suffixes) {
-        $records = @dns_get_record($host, DNS_A);
-        return $records === false ? false : plainAnswers($records, $host, $suffixes);
-    };
     $servers = (array)($gaming['servers'] ?? []);
-    $hosts = [];
-    foreach ($servers as $server) {
-        $hosts = array_merge($hosts, array_filter((array)(((array)$server)['hosts'] ?? []), 'is_string'));
-    }
-    $found = resolveAll(array_values(array_unique($hosts)), $lookup, 10000, fn(): int => (int)(microtime(true) * 1000));
+    $proxyHosts = gameHosts($servers, 'proxy_hosts');
+    /* a proxy host's answer counts through any alias (the suffix ''), still only if public */
+    $lookup = function (string $host) use ($suffixes, $proxyHosts) {
+        $records = @dns_get_record($host, DNS_A);
+        return $records === false ? false
+            : plainAnswers($records, $host, in_array($host, $proxyHosts, true) ? [''] : $suffixes);
+    };
+    $hosts = array_values(array_unique(array_merge(gameHosts($servers, 'hosts'), $proxyHosts)));
+    $found = resolveAll($hosts, $lookup, 10000, fn(): int => (int)(microtime(true) * 1000));
     $hour = intdiv(time(), 3600) * 3600;
-    $learned = updateLearned($cache['learned'], $found['addresses'], ['addresses' => [], 'missing' => []],
+    /* Only the plain hosts' answers are learned, through the shared-CDN rule. A proxy
+       host's address sits in a shared CDN's range, so it is kept by name instead, as
+       messaging keeps a protected name's answer: the last one stands in for a failed
+       lookup for up to a week. The cache's protected entries hold them. */
+    $proxySet = array_flip($proxyHosts);
+    $plain = array_values(array_unique(array_merge([], ...array_values(array_diff_key($found['answers'], $proxySet)))));
+    $learned = updateLearned($cache['learned'], $plain, ['addresses' => [], 'missing' => []],
         $cdnRanges, $hour, 7 * 86400);
-    $checked = checkedRanges(['game servers' => gamingDestinations($learned, $servers)]);
+    $proxy = protectedGuard($proxyHosts, array_intersect_key($found['answers'], $proxySet), $cache['protected'],
+        $hour, 7 * 86400);
+    $checked = checkedRanges(['game servers' => gamingDestinations($learned, $servers, $proxy['addresses'])]);
     $dest = $checked['ranges']['game servers'];
     $diff = syncTable($backend, $table, $dest, $add);
     printf("game servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
@@ -304,7 +313,7 @@ function refreshGamingServers(Backend $backend, string $table, array $gaming, ar
     return [$dest, $diff['added'], [
         'learned' => $learned,
         'published' => [],
-        'protected' => [],
+        'protected' => $proxy['memory'],
         'apps' => [],
         'refreshed_at' => time(),
         'errors' => array_merge(refreshErrors([$found], [], []), $checked['errors'], $diff['errors']),

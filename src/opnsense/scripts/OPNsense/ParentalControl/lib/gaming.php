@@ -181,16 +181,35 @@ function plainAnswers(array $records, string $host, array $aliasSuffixes): array
 }
 
 /**
- * What the game-servers table holds: the addresses learned from the game hosts and
- * every game's shipped ranges, each once, sorted.
+ * One kind of host name across every game in gaming.json, each once: 'hosts', whose
+ * answers must be the names' own, or 'proxy_hosts', reached through a provider's
+ * proxy that gives that one name an address of its own (Cloudflare Spectrum), whose
+ * answers skip the alias and shared-CDN rules.
  *
- * @param array<string, int>   $learned address => time last seen
- * @param array<string, mixed> $servers gaming.json's servers
+ * @param array<mixed> $servers gaming.json's servers, read defensively
  * @return list<string>
  */
-function gamingDestinations(array $learned, array $servers): array
+function gameHosts(array $servers, string $kind): array
 {
-    $all = array_map('strval', array_keys($learned));
+    $hosts = [];
+    foreach ($servers as $server) {
+        $hosts = array_merge($hosts, array_filter((array)(((array)$server)[$kind] ?? []), 'is_string'));
+    }
+    return array_values(array_unique($hosts));
+}
+
+/**
+ * What the game-servers table holds: the addresses learned from the game hosts, the
+ * proxy hosts' addresses, and every game's shipped ranges, each once, sorted.
+ *
+ * @param array<string, int>   $learned address => time last seen
+ * @param array<mixed>         $servers gaming.json's servers, read defensively
+ * @param array<string>        $proxied the proxy hosts' addresses
+ * @return list<string>
+ */
+function gamingDestinations(array $learned, array $servers, array $proxied = []): array
+{
+    $all = array_merge(array_map('strval', array_keys($learned)), $proxied);
     foreach ($servers as $server) {
         $all = array_merge($all, array_filter((array)(((array)$server)['ranges'] ?? []), 'is_string'));
     }

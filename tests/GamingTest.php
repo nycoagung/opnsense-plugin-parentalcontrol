@@ -158,6 +158,26 @@ check('destinations: learned plus ranges, unique, sorted',
     ['192.0.2.0/24', '198.51.100.7', '203.0.113.0/28', '203.0.113.9']);
 check('destinations: a server without ranges adds nothing',
     gamingDestinations([], ['a' => ['label' => 'A', 'hosts' => ['a.example']]]), []);
+/* a proxy host's address sits in a shared CDN's range, so it never enters the learned
+   set: it is added by name, from its own remembered answer */
+check('destinations: proxy hosts\' addresses added',
+    gamingDestinations(['203.0.113.9' => 1], [], ['198.51.100.7', '203.0.113.9']),
+    ['198.51.100.7', '203.0.113.9']);
+
+/* ---- hosts ----------------------------------------------------------------- */
+
+$hostServers = [
+    'a' => ['label' => 'A', 'hosts' => ['a.example', 'b.example'], 'proxy_hosts' => ['p.example']],
+    'b' => ['label' => 'B', 'hosts' => ['b.example', 7], 'ranges' => ['192.0.2.0/24']],
+];
+check('hosts: the plain hosts of every game, each once', gameHosts($hostServers, 'hosts'), ['a.example', 'b.example']);
+check('hosts: the proxy hosts kept apart', gameHosts($hostServers, 'proxy_hosts'), ['p.example']);
+/* a proxy host is looked up with the suffix '': its answer counts through any alias,
+   and still only when public */
+check('answers: a proxy host\'s answer counts through any alias, if public',
+    plainAnswers([$a('x.pacloudflare.example', '203.0.113.8'), $a('x.pacloudflare.example', '10.0.0.8')],
+        'gate.game.example', ['']),
+    ['203.0.113.8']);
 
 /* ---- drop plan ------------------------------------------------------------- */
 
