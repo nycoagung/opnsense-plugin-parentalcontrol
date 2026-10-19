@@ -571,12 +571,13 @@ function rangesDue(?array $entry, int $now, int $maxAge, int $retryAfter): bool
  * failed: the entry keeps its last good copy and that copy's time, and records when
  * it failed, which holds the next try back. A good download replaces the entry,
  * failure and all. Each app's ranges are choosePublished() of this run's download,
- * the last good one and the shipped copy, plus its extra ranges, each range once:
- * ranges the app's own list leaves out, shipped with the plugin. An app with no
- * ranges_url uses its shipped ranges only, never a copy the cache kept from a
- * version that had one.
+ * the last good one and the shipped copy, plus its extra ranges and its per-site
+ * ranges, each range once: ranges the app's own list leaves out, and the addresses
+ * of its servers at every site of its operator, both shipped with the plugin. An
+ * app with no ranges_url uses its shipped ranges only, never a copy the cache kept
+ * from a version that had one.
  *
- * @param array<string, array{ranges_url?: ?string, ranges?: list<string>, extra_ranges?: list<string>}> $apps the
+ * @param array<string, array{ranges_url?: ?string, ranges?: list<string>, extra_ranges?: list<string>, site_ranges?: list<string>}> $apps the
  *        selected apps' entries in messaging.json, by id
  * @param array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}> $published
  *        the cache's downloads, by app id; until one works, fetched_at is 0 and
@@ -619,7 +620,8 @@ function refreshPublished(
         }
         $ranges[$id] = array_values(array_unique(array_merge(
             choosePublished($fresh, $lastGood, $app['ranges'] ?? []),
-            $app['extra_ranges'] ?? []
+            $app['extra_ranges'] ?? [],
+            $app['site_ranges'] ?? []
         )));
     }
     return ['ranges' => $ranges, 'published' => $published, 'failed' => $failed];
@@ -724,7 +726,8 @@ function refreshErrors(array $lookups, array $failedDownloads, array $unanswered
  * device's connections to the same servers, are left alone. A range with
  * $portLo > $portHi holds no port, which is how a caller asks for addresses only.
  * A row missing any key this reads is ignored: a state that cannot be read in full
- * is not killed on a guess.
+ * is not killed on a guess. Single addresses (bare or /32), thousands of them for
+ * the per-site servers, are looked up; only real networks are scanned.
  *
  * @param list<array<string, string>> $records      rows of core's `filter list
  *        states` (its "details"); only id, proto, dst_addr and dst_port are read
@@ -733,13 +736,22 @@ function refreshErrors(array $lookups, array $failedDownloads, array $unanswered
  */
 function selectStatesToDrop(array $records, array $destinations, int $portLo, int $portHi): array
 {
+    $hosts = [];
+    $networks = [];
+    foreach ($destinations as $dest) {
+        if (!str_contains($dest, '/') || str_ends_with($dest, '/32')) {
+            $hosts[explode('/', $dest)[0]] = true;
+        } else {
+            $networks[] = $dest;
+        }
+    }
     $ids = [];
     foreach ($records as $row) {
         if (!isset($row['id'], $row['proto'], $row['dst_addr'], $row['dst_port'])) {
             continue;
         }
         $port = (int)$row['dst_port'];
-        if (ipv4InAny($row['dst_addr'], $destinations)
+        if (isset($hosts[$row['dst_addr']]) || ipv4InAny($row['dst_addr'], $networks)
             || (strtolower($row['proto']) === 'tcp' && $port >= $portLo && $port <= $portHi)) {
             $ids[] = $row['id'];
         }

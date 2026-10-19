@@ -71,22 +71,49 @@ function tableContents(Backend $backend, string $alias): array
  * With $add false it only deletes, and reports nothing added: `pfctl -T add` makes a
  * table that does not exist, and such a table stays until it is killed.
  *
+ * All additions go to pfctl in one call and all deletions in another
+ * (pfTableBulk()): configd's table actions take one address each, and the servers
+ * table can gain thousands at once. When pfctl cannot run, each address goes
+ * through configd instead.
+ *
  * @param list<string> $want
+ * @param ?callable(string, string, list<string>): bool $pfctl pfTableBulk() unless given
  * @return array{added: list<string>, removed: list<string>}
  */
-function syncTable(Backend $backend, string $table, array $want, bool $add = true): array
+function syncTable(Backend $backend, string $table, array $want, bool $add = true, ?callable $pfctl = null): array
 {
     $diff = tableDiff($want, tableContents($backend, $table));
     if (!$add) {
         $diff['added'] = [];
     }
-    foreach ($diff['added'] as $addr) {
-        $backend->configdpRun('filter add table', [$table, $addr]);
-    }
-    foreach ($diff['removed'] as $addr) {
-        $backend->configdpRun('filter delete table', [$table, $addr]);
+    $pfctl ??= pfTableBulk(...);
+    foreach (['add' => $diff['added'], 'delete' => $diff['removed']] as $op => $addrs) {
+        if ($addrs === [] || $pfctl($table, $op, $addrs)) {
+            continue;
+        }
+        foreach ($addrs as $addr) {
+            $backend->configdpRun("filter $op table", [$table, $addr]);
+        }
     }
     return $diff;
+}
+
+/**
+ * `pfctl -t $table -T $op` ('add' or 'delete') for every address at once, read from
+ * stdin; false when pfctl did not run or failed.
+ *
+ * @param list<string> $addrs
+ */
+function pfTableBulk(string $table, string $op, array $addrs): bool
+{
+    $proc = @proc_open(['/sbin/pfctl', '-t', $table, '-T', $op, '-f', '/dev/stdin'],
+        [0 => ['pipe', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
+    if (!is_resource($proc)) {
+        return false;
+    }
+    fwrite($pipes[0], implode("\n", $addrs) . "\n");
+    fclose($pipes[0]);
+    return proc_close($proc) === 0;
 }
 
 /**

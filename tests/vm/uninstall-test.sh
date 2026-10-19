@@ -527,6 +527,11 @@ switch ($cmd) {
         $list = (array)($data['notifications'][$a[0]] ?? []);
         echo is_string($list[0] ?? null) ? $list[0] : '', "\n";
         break;
+    case 'site':                /* site APP: the first per-site server address of APP in messaging.json, bare */
+        $data = json_decode((string)@file_get_contents(DATA_FILE), true);
+        $first = $data['apps'][$a[0]]['site_ranges'][0] ?? '';
+        echo is_string($first) ? preg_replace('#/32$#', '', $first) : '', "\n";
+        break;
     case 'wns':                 /* wns N: the first N WNS /32 entries of messaging.json, bare */
         $data = json_decode((string)@file_get_contents(DATA_FILE), true);
         $ranges = (array)($data['notifications']['microsoft_ranges'] ?? []);
@@ -753,6 +758,14 @@ for ip in $wns; do
     listed Messaging_Servers "$ip" || problem "$ip not listed"
 done
 verdict "server list: WNS /32 entries listed bare"
+# Meta's apps: the servers of every Meta site ship with the plugin, thousands of them,
+# loaded with one pfctl call
+for app in whatsapp facebook_instagram; do
+    ip=$($PC site "$app")
+    { [ -n "$ip" ] && listed Messaging_Servers "$ip"; } || problem "$app: '$ip' not listed"
+done
+[ "$(count Messaging_Servers)" -ge 4000 ] || problem "$(count Messaging_Servers) entries"
+verdict "server list: per-site servers of WhatsApp and Facebook & Instagram listed"
 ST=$(configctl parentalcontrol status 2>&1)
 case $(sget messaging.errors) in *"range download failed"*) problem "errors: $(sget messaging.errors)" ;; esac
 fetched=$($PC jget published.telegram.fetched_at < "$DATA/messaging-cache.json")

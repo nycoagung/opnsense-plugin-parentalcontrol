@@ -44,7 +44,9 @@ nothing, so the plugin is inert until you add a device.
 - a floating rule blocking `NoMessaging` to any destination on TCP ports 5228 to
   5230, which Google reserves for its notification service
 
-Toggling a device is again a pf table update, with no ruleset reload. The four
+Toggling a device is again a pf table update, with no ruleset reload. The servers
+table can hold thousands of entries, so each change to it is loaded with one pfctl
+call. The four
 objects are made the first time a device uses messaging (see Blocking messaging),
 so a firewall that never does gains nothing, and they are found by description
 marker like the rest.
@@ -163,6 +165,16 @@ filter, depending on nothing outside OPNsense core:
   apps' names in turns, one name of each app at a time, so that an app with a
   long list cannot starve one with a short list. Lookups are limited in time,
   and the names not reached are reported.
+- **Meta's servers at every site.** Meta's DNS hands a device a WhatsApp,
+  Facebook or Instagram server at whichever of its sites it picks at that moment,
+  Sydney one minute, Los Angeles or Atlanta the next, so a lookup once a minute
+  can miss the one a device was given. The plugin therefore ships the addresses
+  of these apps' servers at every Meta site, about 870 for WhatsApp and 3,800 for
+  Facebook & Instagram, built at release time from Meta's per-site server names
+  (such as `whatsapp-chatd-edge-shv-01-syd2.facebook.com`) and kept only where
+  they lie in Meta's own network (AS32934). They are blocked whenever the app is
+  selected. The two lists share no address, so blocking one app leaves the other
+  working.
 - **Remembering.** An address is kept for **7 days** after it was last seen,
   because the apps' names rotate through pools of short-lived addresses. The list
   survives a reboot: it lives in `/var/db/parentalcontrol`, outside `config.xml`.
@@ -521,7 +533,9 @@ Blocking messaging is by server address, which sets its limits:
 - Phones that use a manufacturer's own notification service instead of Google's, as
   some phones sold in China do, are not covered.
 - Apple's ranges, Microsoft's list, and Viber's, KakaoTalk's and LINE's networks
-  are only as current as the installed plugin version.
+  are only as current as the installed plugin version. So are Meta's per-site
+  servers: a site Meta opens after a release is blocked only once its addresses
+  come up in the apps' names.
 - The list of apps is one for every device: there is no per-device choice.
 - While a device uses messaging and the firewall's own resolver is failing, each
   per-minute sync spends up to about 30 to 40 seconds on lookups while it holds its
@@ -540,10 +554,10 @@ renaming the alias in both directions, confirming the aliases rename in place, t
 rule follows, the old pf table is flushed, no duplicate pair appears and
 enforcement never lapses.
 
-**Tests.** Five test files, which need no OPNsense and no network, only PHP 8.1 or
+**Tests.** Six test files, which need no OPNsense and no network, only PHP 8.1 or
 later (with its dom, ctype, filter and SimpleXML extensions) and Python 3:
 
-    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; python3 -I tests/BuildMessagingDataTest.py
+    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; python3 -I tests/BuildMessagingDataTest.py
 
 Each prints a line per check and exits 1 when one fails. All pass, re-run on
 2026-10-19:
@@ -551,10 +565,11 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | File | Checks | What it covers |
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
-| `tests/MessagingTest.php` | 165 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/MessagingDataTest.php` | 42 | `messaging.json`: no private range or shared-CDN range in it, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
+| `tests/MessagingTest.php` | 167 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
-| `tests/BuildMessagingDataTest.py` | 24 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
+| `tests/FirewallTest.php` | 5 | loading a pf table: one pfctl call for the additions and one for the deletions, configd for each address when pfctl fails |
+| `tests/BuildMessagingDataTest.py` | 30 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and from Meta's per-site server names and checks them, that no address is in two apps' ranges, and its check of the protected names' owners |
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
@@ -569,9 +584,9 @@ rule's ports, every one caught. In the first three library stages each of
 the 89 checks was shown failing under at least one broken copy. Every broken copy
 was caught except seven in `MessagingTest.php`: five behave the same as the
 original on every input that can occur, and two fold the case of alias names,
-which the tests leave open on purpose. For 0.2.0, 27 more broken copies were all
-caught: 10 of the library, 5 of the generator, 10 of the data file and 2 of the
-migration.
+which the tests leave open on purpose. For 0.2.0, 33 more broken copies were all
+caught: 12 of the library, 8 of the generator, 10 of the data file, 2 of the
+migration and 1 of the table loading.
 
 **Static analysis (0.2.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
 (9), over the plugin's scripts, library files, `controllers/` and model, its
@@ -725,6 +740,16 @@ own, and that LINE still announces from AS38631. Kakao Games, Kakao Pay, KakaoBa
 and Kakao Pay Insurance are separate companies with their own networks and stay
 out. Then regenerate and read the diff: a range that grows a lot needs a look
 before it ships.
+
+**Before each release, refresh Meta's site list.** `meta_sites` in
+`tools/messaging-sources.json` lists the server-and-site suffixes (`01-syd2`) of
+Meta's per-site server names, and each app's `meta_site_hosts` the name of each
+kind of server with `{site}` in place of the suffix. The list was taken on
+2026-10-19 from ProjectDiscovery's Chaos dataset for facebook.com: every
+`-shv-NN-SITE` suffix of the kinds of server the templates name. Take it again
+from there, or from the reverse names of the servers the apps reach, so that new
+sites are blocked from the start. A build resolves about 20,000 names and takes a
+minute or two; stale suffixes simply do not resolve.
 
 **Before each release, check for a newer Microsoft WNS file.** The generator pins
 one dated file, `WNSPublicIPs_<date>.xml`, in `tools/messaging-sources.json`

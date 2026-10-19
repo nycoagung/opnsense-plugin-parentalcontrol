@@ -157,6 +157,31 @@ check('ranges: an app without extra ranges has none',
 check('ranges: an extra range with host bits set stops the build',
       error(gen.extra_ranges, 'example', {'extra_ranges': ['198.51.100.7/24']}),
       'example: extra range 198.51.100.7/24 is not a network address')
+# Meta's per-site server names: one template per service, {site} standing for each
+# server-and-site suffix (01-syd2); every answer must lie in the owner's networks
+check('sites: each template is expanded for every server of every site',
+      gen.site_hosts({'meta_site_hosts': ['a-shv-{site}.example', 'b-shv-{site}.example']}, ['01-syd2', '02-lax3']),
+      ['a-shv-01-syd2.example', 'a-shv-02-lax3.example', 'b-shv-01-syd2.example', 'b-shv-02-lax3.example'])
+check('sites: an app without per-site names has none',
+      gen.site_hosts({'hosts': ['a.example']}, ['01-syd2']),
+      [])
+site_answers = {'a.example': ['198.51.100.9', '198.51.100.7'], 'b.example': ['198.51.100.7'], 'c.example': [],
+                'd.example': ['203.0.113.9']}
+def site_resolve(hosts):
+    return {h: site_answers[h] for h in hosts}
+sites, outside = gen.site_ranges('example', list(site_answers), [ipaddress.ip_network('198.51.100.0/24')], site_resolve)
+check('sites: answers inside the owner networks become /32 ranges, each once; the rest is set aside',
+      [gen.strs(sites), outside],
+      [['198.51.100.7/32', '198.51.100.9/32'], ['203.0.113.9']])
+check('sites: no answer inside the owner networks stops the build',
+      error(gen.site_ranges, 'example', ['c.example', 'd.example'], [ipaddress.ip_network('198.51.100.0/24')], site_resolve),
+      'example: none of its 2 per-site names resolved inside the owner networks')
+check("apps: an address in two apps' ranges stops the build",
+      error(gen.check_disjoint, {'a': [ipaddress.ip_network('198.51.100.7/32')], 'b': [ipaddress.ip_network('198.51.100.0/24')]}),
+      'apps a and b both hold 198.51.100.7/32')
+check('apps: apps with separate ranges pass',
+      gen.check_disjoint({'a': [ipaddress.ip_network('198.51.100.7/32')], 'b': [ipaddress.ip_network('198.51.100.8/32')], 'c': []}),
+      None)
 check('ranges: an app with no ranges has none',
       gen.app_ranges('example', {'hosts': ['a.example']}, get),
       [])

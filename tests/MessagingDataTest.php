@@ -50,7 +50,7 @@ $notes = $data['notifications'] ?? [];
 $shared = $data['shared_cdn_ranges'] ?? [];
 $appHosts = array_merge([], ...array_values(array_column($apps, 'hosts')));
 $appRanges = array_merge([], ...array_values(array_column($apps, 'ranges')),
-    ...array_values(array_column($apps, 'extra_ranges')));
+    ...array_values(array_column($apps, 'extra_ranges')), ...array_values(array_column($apps, 'site_ranges')));
 $allRanges = array_merge($appRanges, $notes['apple_ranges'] ?? [], $notes['microsoft_ranges'] ?? [], $shared);
 $network = fn(string $cidr): string => explode('/', $cidr)[0];
 
@@ -159,6 +159,39 @@ check('facebook_instagram: their fallbacks are listed',
 check('whatsapp: the media fallback name is listed',
     in_array('mmg-fallback.whatsapp.net', $apps['whatsapp']['hosts'] ?? [], true),
     true);
+/* Meta's DNS hands a client a server at any of its sites, so the servers of every site
+   ship with the plugin: the ones the maintainer's device reached in Sydney, Atlanta and
+   Los Angeles among them */
+$sites = fn(string $app): array => $apps[$app]['site_ranges'] ?? [];
+check('whatsapp: its chat and media servers at Meta\'s sites ship with the plugin',
+    [count($sites('whatsapp')) >= 100, array_map(fn(string $ip): bool => ipv4InAny($ip, $sites('whatsapp')),
+        ['157.240.8.54', '57.144.253.33', '157.240.11.53', '157.240.8.53'])],
+    [true, array_fill(0, 4, true)]);
+check('facebook_instagram: its gateway, live-message and chat servers at Meta\'s sites ship with the plugin',
+    [count($sites('facebook_instagram')) >= 1000, array_map(fn(string $ip): bool => ipv4InAny($ip, $sites('facebook_instagram')),
+        ['157.240.8.40', '157.240.11.40', '157.240.8.142', '157.240.8.30', '57.144.4.192'])],
+    [true, array_fill(0, 5, true)]);
+/* selecting one app must never block another: one sweep in address order */
+$spans = [];
+foreach ($apps as $id => $app) {
+    foreach (array_merge($app['ranges'] ?? [], $app['extra_ranges'] ?? [], $app['site_ranges'] ?? []) as $c) {
+        [$net, $bits] = array_pad(explode('/', $c), 2, '32');
+        $start = (int)ip2long($net);
+        $spans[] = [$start, $start + (1 << (32 - (int)$bits)) - 1, $id, $c];
+    }
+}
+sort($spans);
+$inTwo = [];
+$reach = null;
+foreach ($spans as [$start, $end, $id, $c]) {
+    if ($reach !== null && $start <= $reach[0] && $id !== $reach[1]) {
+        $inTwo[] = "$c ($id) inside {$reach[2]} ({$reach[1]})";
+    }
+    if ($reach === null || $end > $reach[0]) {
+        $reach = [$end, $id, $c];
+    }
+}
+check('apps: no address is in two apps\' ranges', $inTwo, []);
 /* Telegram's apps have an address of their own built in, in a block Telegram announces
    but leaves out of its published list */
 check('telegram: the extra ranges hold the address its apps have built in',

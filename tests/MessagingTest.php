@@ -615,6 +615,12 @@ check('published: extra ranges are added to the last good list after a failed do
 check('published: extra ranges are added to the shipped ranges of an app with no list address',
     refreshPublished(['n' => $unlisted + $extra], [], $now, $day, $hour, $fetch)['ranges'],
     ['n' => ['203.0.113.0/28', '203.0.113.128/25', '198.51.100.0/24']]);
+/* the addresses of an app's servers at every site of its operator, built from their
+   per-site names, are shipped the same way */
+check('published: per-site ranges are added like extra ranges',
+    refreshPublished(['n' => $unlisted + $extra + ['site_ranges' => ['198.51.100.7/32', '203.0.113.0/28']]], [], $now,
+        $day, $hour, $fetch)['ranges'],
+    ['n' => ['203.0.113.0/28', '203.0.113.128/25', '198.51.100.0/24', '198.51.100.7/32']]);
 
 /* ---- sanitizeCache --------------------------------------------------------- */
 
@@ -716,6 +722,12 @@ check('states: destination address',
         [['id' => 'a/1', 'proto' => 'tcp', 'dst_addr' => '198.51.100.7', 'dst_port' => '443']],
         ['198.51.100.7'], 5228, 5230),
     ['a/1']);
+check('states: destination written as a /32',
+    selectStatesToDrop(
+        [['id' => 'a/2', 'proto' => 'tcp', 'dst_addr' => '198.51.100.9', 'dst_port' => '443'],
+         ['id' => 'a/3', 'proto' => 'tcp', 'dst_addr' => '198.51.100.10', 'dst_port' => '443']],
+        ['198.51.100.9/32', '192.0.2.0/25'], 5228, 5230),
+    ['a/2']);
 check('states: destination range',
     selectStatesToDrop(
         [['id' => 'b/1', 'proto' => 'udp', 'dst_addr' => '192.0.2.200', 'dst_port' => '3478']],

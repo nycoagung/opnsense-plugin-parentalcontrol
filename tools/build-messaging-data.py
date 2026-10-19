@@ -24,7 +24,14 @@ tools/messaging-sources.json and adds the lists it downloads:
   (the same page, rendered on the server) and update
   notifications.microsoft_ranges_url. --wns reads a local copy instead;
 - the shared CDNs' ranges (Cloudflare, Fastly, Amazon CloudFront, and Akamai's
-  announced prefixes from RIPEstat), merged.
+  announced prefixes from RIPEstat), merged;
+- the addresses of Meta's per-site servers for the apps with meta_site_hosts:
+  each template with {site} replaced by every server-and-site suffix in
+  meta_sites (01-syd2), resolved through this machine's resolver, keeping the
+  answers inside meta_sites' owner AS (AS32934's announced prefixes, from
+  RIPEstat) as site_ranges. Meta's DNS hands a client a server at one of its many
+  sites, which a minute's lookup may never see, so every site's servers are
+  blocked. No address may be in two apps' ranges.
 
 A failed download, an entry that is not an address range, a WNS file without
 the element, a list that comes out empty, an app range that fails its checks,
@@ -57,12 +64,14 @@ commit it.
 """
 
 import argparse
+import concurrent.futures
 import datetime
 import functools
 import ipaddress
 import json
 import re
 import socket
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -166,6 +175,49 @@ def extra_ranges(app_id, app):
     return nets
 
 
+def site_hosts(app, sites):
+    """An app's per-site server names: each meta_site_hosts template with {site}
+    replaced by every server-and-site suffix (01-syd2), template by template."""
+    return [template.replace('{site}', site) for template in app.get('meta_site_hosts', []) for site in sites]
+
+
+def site_ranges(app_id, hosts, owned, resolve_hosts):
+    """The answers of an app's per-site names that lie in its owner's networks, as
+    /32 networks, each once; and the answers outside them, set aside. A name that
+    does not resolve is skipped: not every service runs at every site."""
+    answers = resolve_hosts(hosts)
+    inside, outside = set(), set()
+    for ip in (ip for host in hosts for ip in answers.get(host, [])):
+        addr = ipaddress.ip_address(ip)
+        (inside if any(addr in n for n in owned) else outside).add(addr)
+    if not inside:
+        raise ValueError(f'{app_id}: none of its {len(hosts)} per-site names resolved inside the owner networks')
+    return ([ipaddress.ip_network(f'{a}/32') for a in sorted(inside)],
+            [str(a) for a in sorted(outside)])
+
+
+def resolve_all(hosts):
+    """Each host's IPv4 answers through this machine's resolver, many at a time."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+        return dict(zip(hosts, pool.map(resolve, hosts)))
+
+
+def check_disjoint(apps):
+    """No address may be in two apps' ranges: selecting one app would block the
+    other. apps maps each app id to its networks. One sweep in address order: a
+    network that starts inside the farthest-reaching network so far, of another
+    app, overlaps it."""
+    reach = None        # (last address, app id, network) reaching farthest so far
+    for start, end, app_id, net in sorted((int(n.network_address), int(n.broadcast_address), app_id, n)
+                                          for app_id, nets in apps.items() for n in nets):
+        if reach and start <= reach[0] and app_id != reach[1]:
+            pair = sorted([app_id, reach[1]])
+            narrow = net if net.prefixlen >= reach[2].prefixlen else reach[2]
+            raise ValueError(f'apps {pair[0]} and {pair[1]} both hold {narrow}')
+        if reach is None or end > reach[0]:
+            reach = (end, app_id, net)
+
+
 def check_app_ranges(app_id, nets, cdn, notify):
     """sync.php blocks an app's ranges as they are, so each must be no wider than
     /8, clear of the shared CDNs and the notification ranges, and public all
@@ -205,15 +257,31 @@ def build(wns_file):
     ] + [asn_prefixes(url, fetch(url).decode()) for url in cdn['akamai']]
     shared = sorted(ipaddress.collapse_addresses(n for nets in cdn_lists for n in nets))
     notify = [ipaddress.ip_network(c) for c in notes['apple_ranges']] + microsoft
+    meta = src.get('meta_sites')
+    owned = []
+    if meta:
+        where = f'https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS{meta["owner_asn"]}'
+        owned = asn_prefixes(where, fetch(where).decode())
     apps = {}
     for app_id, app in src['apps'].items():
         ranges = app_ranges(app_id, app)
         extra = extra_ranges(app_id, app)
-        check_app_ranges(app_id, ranges + extra, shared, notify)
+        hosts = site_hosts(app, meta['servers'] if meta else [])
+        sites = []
+        if hosts:
+            sites, outside = site_ranges(app_id, hosts, owned, resolve_all)
+            if outside:
+                print(f'{app_id}: {len(outside)} per-site answers outside AS{meta["owner_asn"]} left out: '
+                      + ' '.join(outside[:8]), file=sys.stderr)
+        check_app_ranges(app_id, ranges + extra + sites, shared, notify)
         apps[app_id] = {'label': app['label'], 'hosts': app['hosts'],
                         'ranges_url': app.get('ranges_url'), 'ranges': strs(ranges)}
         if extra:
             apps[app_id]['extra_ranges'] = strs(extra)
+        if sites:
+            apps[app_id]['site_ranges'] = strs(sites)
+    check_disjoint({app_id: [ipaddress.ip_network(c) for c in app['ranges'] + app.get('extra_ranges', [])
+                             + app.get('site_ranges', [])] for app_id, app in apps.items()})
     return {
         'schema': 1,
         'generated': datetime.date.today().isoformat(),
@@ -268,6 +336,9 @@ def check():
     listed = {f'{app_id} ranges': app['ranges'] + app.get('extra_ranges', []) for app_id, app in data['apps'].items()}
     listed.update(apple_ranges=notes['apple_ranges'], microsoft_ranges=notes['microsoft_ranges'])
     listed = {name: [ipaddress.ip_network(c) for c in cidrs] for name, cidrs in listed.items()}
+    # per-site addresses were checked against their owner's networks when built
+    sites = {f'{app_id} per-site ranges': [ipaddress.ip_network(c) for c in app['site_ranges']]
+             for app_id, app in data['apps'].items() if app.get('site_ranges')}
     for group, hosts in groups:
         guarded = protected(group)
         for host in hosts:
@@ -280,12 +351,14 @@ def check():
                     print(f'    {ip:15}  not a public address, the resolver may have blocked it: unknown')
                     continue
                 verdict = 'protected' if ip in guarded else 'shared CDN' if any(addr in n for n in cdn) else 'kept'
-                inside = [name for name, nets in listed.items() if any(addr in n for n in nets)]
+                inside = [name for name, nets in [*listed.items(), *sites.items()] if any(addr in n for n in nets)]
                 print(f'    {ip:15}  {verdict:10}  {owner(ip)}' + (f'  (in {", ".join(inside)})' if inside else ''))
     # the shipped ranges are blocked without a lookup, so their owners are checked here
     for name, nets in listed.items():
         for net in nets:
             print(f'{name} {net}  {owner(str(net.network_address))}')
+    for name, nets in sites.items():
+        print(f'{name}: {len(nets)} addresses of per-site server names, inside their owner networks when built')
 
 
 def main():

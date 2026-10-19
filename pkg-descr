@@ -52,6 +52,11 @@ Plugin Changelog
 * Facebook & Instagram lists every gateway, live-message and encrypted-chat
   server family Meta's apps use, with their fallbacks, and Facebook Lite;
   WhatsApp's media fallback is listed too
+* WhatsApp and Facebook & Instagram are blocked at every Meta site: the
+  addresses of their servers at all of Meta's sites ship with the plugin, so an
+  app that Meta's DNS sends to a far-away site is still blocked
+* Changes to the servers table are loaded with one pfctl call each, so
+  thousands of entries apply at once
 
 0.1.0
 

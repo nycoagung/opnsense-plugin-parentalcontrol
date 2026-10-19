@@ -213,7 +213,7 @@ Select only WhatsApp and press Apply.
 - [ ] Messenger signs in for the first time: sign out of Messenger, or install it
       fresh, then sign in and open a chat. Its one-time setup of encrypted chats
       may use a WhatsApp server; note whether the sign-in and the chat work.
-- [ ] WhatsApp stays blocked.
+- [ ] WhatsApp stays blocked, also five minutes later: messages and calls.
 
 ### All eight again
 
