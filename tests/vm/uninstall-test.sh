@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Parental Control on a test VM: install, the messaging block, and uninstall.
+# Parental Control on a test VM: install, the messaging and gaming blocks, and uninstall.
 #
 # Run it as root on a DISPOSABLE OPNsense 26.7 virtual machine that has internet
 # access, never on a firewall in use. It installs and removes the plugin several
@@ -73,6 +73,16 @@ Parental Control: messaging servers
 Parental Control: block messaging
 Parental Control: block notification ports
 Parental Control: evaluate device schedules'
+# the gaming objects' markers: made on first use only, so not in MARKERS, which
+# in_place() wants present whenever messaging is
+GAME_MARKERS='Parental Control: devices currently denied gaming
+Parental Control: game servers
+Parental Control: never treated as gaming
+Parental Control: gaming UDP ports
+Parental Control: gaming TCP ports
+Parental Control: block gaming UDP
+Parental Control: block gaming TCP ports
+Parental Control: block game servers'
 WAITING='waiting for a running sync to finish'      # uninstall.php while the lock is held
 PAUSED='uninstall in progress - nothing changed'    # sync.php once uninstall has begun
 
@@ -114,6 +124,17 @@ plugin_lines() { grep -c 'Parental Control:' "$CONF"; }
 missing_markers() {
     printf '%s\n' "$MARKERS" | while IFS= read -r _mk; do
         grep -qF -- "$_mk" "$CONF" || printf '%s; ' "$_mk"
+    done
+}
+# the gaming markers config.xml lacks, and the ones it has
+game_missing() {
+    printf '%s\n' "$GAME_MARKERS" | while IFS= read -r _mk; do
+        grep -qF -- "$_mk" "$CONF" || printf '%s; ' "$_mk"
+    done
+}
+game_present() {
+    printf '%s\n' "$GAME_MARKERS" | while IFS= read -r _mk; do
+        ! grep -qF -- "$_mk" "$CONF" || printf '%s; ' "$_mk"
     done
 }
 # problems unless every plugin object, the device's entry and the servers are there
@@ -180,6 +201,7 @@ BG=' '
 HOLDER=                     # the current lock holder
 USH=                        # an uninstall.sh running in the background (8b)
 RULE=                       # the uuid of the test's own firewall rule while it exists
+FALIAS=                     # the uuid of the test's own alias while it exists (5b)
 track()  { BG="$BG$1 "; }
 forget() { case $BG in *" $1 "*) BG="${BG%% "$1" *} ${BG#* "$1" }" ;; esac; }
 reap()   { wait "$1"; _rc=$?; forget "$1"; return "$_rc"; }
@@ -210,6 +232,7 @@ cleanup() {
     fi
     for _p in $BG; do stop "$_p"; done
     [ -z "$RULE" ] || $PC rule-del "$RULE" > /dev/null 2>&1
+    [ -z "$FALIAS" ] || $PC alias-del "$FALIAS" > /dev/null 2>&1
     if [ -f "$W/resolv.conf.orig" ]; then
         cp -p "$W/resolv.conf.orig" /etc/resolv.conf && rm -f "$W/resolv.conf.orig"
     fi
@@ -262,11 +285,11 @@ removed_checks() {          # removed_checks PREFIX [plugin]
     compare_config "$1: config.xml equals the saved copy" "${2:-}"
 }
 tables_gone() {             # tables_gone PREFIX ALIAS: ALIAS is the internet alias's name
-    for _t in "$2" NoMessaging Messaging_Servers; do
+    for _t in "$2" NoMessaging Messaging_Servers NoGaming Gaming_Servers Gaming_Exempt; do
         ! pfctl -s Tables 2>/dev/null | grep -qxF "$_t" ||
             problem "still listed: $(pfctl -vs Tables 2>/dev/null | grep -E "[[:space:]]$_t\$" | tr -s '\t ' ' ') ($(count "$_t") entries)"
     done
-    verdict "$1: none of the three tables in pfctl -s Tables"
+    verdict "$1: none of the plugin's six tables in pfctl -s Tables"
 }
 
 # ---- 1. preflight -----------------------------------------------------------
@@ -302,14 +325,23 @@ cat > "$W/pc.php" <<'PHP'
 const CONFIG_XML = '/conf/config.xml';
 const LOCK_FILE = '/var/db/parentalcontrol/sync.lock';      /* DATA_DIR/sync.lock */
 const DATA_FILE = '/usr/local/opnsense/scripts/OPNsense/ParentalControl/messaging.json';
+const GAME_DATA_FILE = '/usr/local/opnsense/scripts/OPNsense/ParentalControl/gaming.json';
+const LIB = '/usr/local/opnsense/scripts/OPNsense/ParentalControl/lib';
 
 $cmd = $argv[1] ?? '';
 $a = array_slice($argv, 2);
 
 /* the firewall's classes, loaded the way sync.php loads them; config.inc also
    sets the firewall's timezone, which sync.php's schedule uses too */
-if (in_array($cmd, ['general', 'add', 'set', 'del', 'window', 'alias-ok', 'rule-add', 'rule-del', 'model-version'], true)) {
+if (in_array($cmd, ['general', 'add', 'set', 'del', 'window', 'alias-ok', 'rule-add', 'rule-del', 'model-version',
+    'alias-add', 'alias-del', 'alias-content', 'strip-field'], true)) {
     require_once('config.inc');
+}
+/* the plugin's own pure functions, for what the gaming checks expect */
+if (in_array($cmd, ['gaming-data', 'own-ipv4'], true)) {
+    foreach (['markers.php', 'messaging.php', 'gaming.php'] as $lib) {
+        require LIB . "/$lib";
+    }
 }
 
 /* validate, then save; every message goes to stderr, as the plugin's saveModel() does */
@@ -344,13 +376,14 @@ switch ($cmd) {
         $mdl->general->{$a[0]} = $a[1];
         save($mdl);
         break;
-    case 'add':                 /* add NAME ADDRESS MESSAGING: a device whose internet is always allowed */
+    case 'add':                 /* add NAME ADDRESS MESSAGING [GAMING]: a device whose internet is always allowed */
         $mdl = new \OPNsense\ParentalControl\ParentalControl();
         $dev = $mdl->devices->Add();
         $dev->name = $a[0];
         $dev->address = $a[1];
         $dev->mode = 'allow';
         $dev->messaging = $a[2];
+        $dev->gaming = $a[3] ?? 'off';
         save($mdl);
         break;
     case 'set':                 /* set NAME FIELD VALUE */
@@ -365,7 +398,7 @@ switch ($cmd) {
         $mdl->devices->del($uuid);
         save($mdl);
         break;
-    case 'window':              /* window NAME FROM TO: messaging follows now+FROM .. now+TO minutes */
+    case 'window':              /* window NAME FROM TO [FIELD]: FIELD (messaging) follows now+FROM .. now+TO minutes */
         /* HH:MM modulo a day: a window may cross midnight, which the schedule handles */
         $now = (int)date('H') * 60 + (int)date('i');
         $at = fn(int $offset): string => sprintf(
@@ -375,7 +408,7 @@ switch ($cmd) {
         );
         $mdl = new \OPNsense\ParentalControl\ParentalControl();
         [, $dev] = device($mdl, $a[0]);
-        $dev->messaging = 'schedule';
+        $dev->{$a[3] ?? 'messaging'} = 'schedule';
         $dev->allow_from = $at((int)$a[1]);
         $dev->allow_to = $at((int)$a[2]);
         save($mdl);
@@ -416,6 +449,65 @@ switch ($cmd) {
             exit(1);
         }
         save($flt);
+        break;
+    case 'alias-add':           /* alias-add NAME: a user's network alias, as one made in the GUI; prints its uuid */
+        $als = new \OPNsense\Firewall\Alias();
+        $node = $als->aliases->alias->Add();
+        $node->name = $a[0];
+        $node->type = 'network';
+        $node->enabled = '1';
+        $node->content = '192.0.2.99';
+        $node->description = 'a user alias';
+        save($als);
+        foreach ($als->aliases->alias->iterateItems() as $uuid => $item) {
+            if ($item->name->getValue() === $a[0]) {
+                echo $uuid, "\n";
+            }
+        }
+        break;
+    case 'alias-del':           /* alias-del UUID */
+        $als = new \OPNsense\Firewall\Alias();
+        if (!$als->aliases->alias->del($a[0])) {
+            fwrite(STDERR, "no alias {$a[0]}\n");
+            exit(1);
+        }
+        save($als);
+        break;
+    case 'alias-content':       /* alias-content NAME: the alias's content as stored */
+        foreach ((new \OPNsense\Firewall\Alias())->aliases->alias->iterateItems() as $item) {
+            if ($item->name->getValue() === $a[0]) {
+                echo $item->content->getValue(), "\n";
+                exit(0);
+            }
+        }
+        fwrite(STDERR, "no alias {$a[0]}\n");
+        exit(1);
+    case 'strip-field':         /* strip-field NAME FIELD: remove a device's FIELD from config.xml, as a version without it saved it */
+        $cfg = \OPNsense\Core\Config::getInstance();
+        foreach ($cfg->object()->OPNsense->ParentalControl->devices->device ?? [] as $node) {
+            if ((string)$node->name === $a[0]) {
+                unset($node->{$a[1]});
+                $cfg->save();
+                exit(0);
+            }
+        }
+        fwrite(STDERR, "no device named {$a[0]}\n");
+        exit(1);
+    case 'gaming-data':         /* gaming-data KEY: what gaming.json makes of udp-content, tcp-content, discord or vivox */
+        $g = json_decode((string)file_get_contents(GAME_DATA_FILE), true);
+        $hosts = array_merge(...array_values(array_map(fn(array $s): array => $s['hosts'] ?? [], $g['servers'])));
+        echo match ($a[0]) {
+            'udp-content' => portAliasContent(complementPorts($g['safe_udp_ports'])),
+            'tcp-content' => portAliasContent($g['tcp_ports']),
+            'discord' => implode(' ', $g['never_blocked']['discord']),
+            'vivox' => implode(' ', $g['servers']['vivox']['ranges']),
+            'first-host' => $hosts[0] ?? '',
+        }, "\n";
+        break;
+    case 'own-ipv4':            /* own-ipv4: the firewall's own addresses, as sync.php reads them */
+        $out = [];
+        exec('/sbin/ifconfig -a 2>/dev/null', $out);
+        echo implode(' ', firewallIpv4(implode("\n", $out))), "\n";
         break;
     case 'model-version':       /* model-version [VERSION]: prints the settings' stored version, then stores VERSION ("" for none) */
         $cfg = \OPNsense\Core\Config::getInstance();
@@ -675,7 +767,7 @@ s=$(csync)
 verdict "configure: enabled, vm-test added, sync answers OK"
 
 h0=$(md5 -q "$CONF")
-for name in NoMessaging Messaging_Servers; do
+for name in NoMessaging Messaging_Servers NoGaming Gaming_Servers Gaming_Exempt Gaming_UDP_Ports Gaming_TCP_Ports; do
     out=$($PC alias-ok "$name" 2>&1) && problem "accepted"
     printf '%s' "$out" | grep -qF "$name" || problem "said: $(oneline "$out")"
     verdict "configure: alias name $name rejected by the model"
@@ -897,6 +989,154 @@ ST=$(configctl parentalcontrol status 2>&1)
 [ "$(sget messaging.in_use)" = false ] || problem "in_use: $(sget messaging.in_use)"
 [ "$(sget messaging.refreshed_at)" = null ] || problem "refreshed_at: $(sget messaging.refreshed_at)"
 verdict "schedule: status says messaging is not in use"
+
+# ---- 5b. gaming ---------------------------------------------------------------
+
+section "5b gaming"
+# A device saved by 0.2.0 has no gaming field: it must load as Not blocked, and
+# nothing of gaming may appear until a device uses it.
+out=$($PC strip-field vm-test gaming 2>&1) || problem "strip: $(oneline "$out")"
+calm
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+ST=$(configctl parentalcontrol status 2>&1)
+[ "$(sget devices.0.gaming)" = '"off"' ] || problem "gaming: $(sget devices.0.gaming)"
+[ "$(sget devices.0.gaming_blocked)" = false ] || problem "gaming_blocked: $(sget devices.0.gaming_blocked)"
+verdict "gaming: a device saved without the field, as by 0.2.0, loads as Not blocked"
+_g=$(game_present)
+[ -z "$_g" ] || problem "in config.xml: $_g"
+for _t in NoGaming Gaming_Servers Gaming_Exempt; do
+    ! pfctl -s Tables 2>/dev/null | grep -qxF "$_t" || problem "table $_t exists"
+done
+verdict "gaming: no gaming object or table while no device uses gaming"
+
+# An alias of the user's under a gaming name: gaming stays off and says why, and
+# the internet and messaging parts of the sync carry on.
+FALIAS=$($PC alias-add Gaming_Exempt 2>&1) || { problem "alias-add: $(oneline "$FALIAS")"; FALIAS=; }
+out=$($PC set vm-test gaming on 2>&1) || problem "set: $(oneline "$out")"
+calm
+out=$("$SCRIPTS/sync.php" 2>&1); rc=$?
+[ "$rc" = 0 ] || problem "exit $rc: $(oneline "$out")"
+printf '%s\n' "$out" | grep -qF 'gaming: alias name Gaming_Exempt is used by an alias this plugin does not own' ||
+    problem "said: $(oneline "$out")"
+{ printf '%s\n' "$out" | grep -q '^blocked=' && printf '%s\n' "$out" | grep -q '^messaging blocked='; } ||
+    problem "the internet or messaging part did not run: $(oneline "$out")"
+_g=$(game_present)
+[ -z "$_g" ] || problem "made under a conflict: $_g"
+ST=$(configctl parentalcontrol status 2>&1)
+case $(sget gaming.error) in
+    *"Gaming_Exempt is used by an alias this plugin does not own"*) ;;
+    *) problem "status error: $(sget gaming.error)" ;;
+esac
+verdict "gaming: a user's alias named Gaming_Exempt keeps gaming off, says so in status, the rest syncs"
+if [ -n "$FALIAS" ]; then
+    out=$($PC alias-del "$FALIAS" 2>&1) && FALIAS= || problem "alias-del: $(oneline "$out")"
+fi
+
+# First use: every object in one sync, the port aliases as the data says, the
+# never-blocked table before the device
+calm
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+_m=$(game_missing)
+[ -z "$_m" ] || problem "missing from config.xml: $_m"
+for m in 'Parental Control: block gaming UDP' 'Parental Control: block gaming TCP ports' \
+         'Parental Control: block game servers'; do
+    grep -qF -- "$m" /tmp/rules.debug || problem "no '$m' in /tmp/rules.debug"
+done
+verdict "gaming: five aliases and three rules made in one sync on first use, and loaded"
+u=$($PC alias-content Gaming_UDP_Ports 2>&1)
+uw=$($PC gaming-data udp-content 2>&1)
+{ [ -n "$uw" ] && [ "$u" = "$uw" ]; } || problem "Gaming_UDP_Ports: $(oneline "$u")"
+t=$($PC alias-content Gaming_TCP_Ports 2>&1)
+tw=$($PC gaming-data tcp-content 2>&1)
+{ [ -n "$tw" ] && [ "$t" = "$tw" ]; } || problem "Gaming_TCP_Ports: $(oneline "$t")"
+verdict "gaming: the port aliases hold every UDP port but the safe-list, and the game TCP ports"
+for e in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 224.0.0.0/4 255.255.255.255 \
+         $($PC gaming-data discord) $($PC own-ipv4); do
+    listed Gaming_Exempt "$e" || problem "$e not in Gaming_Exempt"
+done
+[ "$(count Gaming_Exempt)" -ge 1000 ] || problem "$(count Gaming_Exempt) entries: no messaging app networks"
+verdict "gaming: Gaming_Exempt holds the local set, the firewall's own addresses, Discord and the messaging apps"
+for r in $($PC gaming-data vivox); do
+    listed Gaming_Servers "$r" || problem "$r not in Gaming_Servers"
+done
+[ "$(count Gaming_Servers)" -gt 2 ] || problem "no game host learned: $(tbl Gaming_Servers | tr '\n' ' ')"
+verdict "gaming: Gaming_Servers holds Vivox's ranges and the game hosts' addresses"
+listed NoGaming "$DEV" || problem "NoGaming: $(tbl NoGaming | tr '\n' ' ')"
+verdict "gaming: $DEV in NoGaming"
+ST=$(configctl parentalcontrol status 2>&1)
+[ "$(sget devices.0.gaming_blocked)" = true ] || problem "gaming_blocked: $(sget devices.0.gaming_blocked)"
+[ "$(sget gaming.in_use)" = true ] || problem "in_use: $(sget gaming.in_use)"
+[ "$(sget gaming.error)" = null ] || problem "error: $(sget gaming.error)"
+case $(sget gaming.refreshed_at) in ''|*[!0-9]*) problem "refreshed_at: $(sget gaming.refreshed_at)" ;; esac
+verdict "gaming: status says vm-test is denied gaming, in use, refreshed, no error"
+# rewriting a port alias on every run would reload the filter every minute
+h0=$(md5 -q "$CONF")
+calm
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+[ "$(md5 -q "$CONF")" = "$h0" ] || problem "config.xml changed"
+verdict "gaming: a sync with nothing to change saves nothing"
+
+# A newly gaming-blocked device loses its connection to a game server, as for
+# messaging: the device is the VM itself, and the target the first game host in
+# gaming.json on 443, which the refresh has learned. The control goes elsewhere.
+CONNS=
+ghost=$($PC gaming-data first-host)
+if [ -z "$ghost" ] || ! conn gtarget "$ghost" 443; then
+    skip "gaming drops" "no connection to ${ghost:-the first game host}:443: $(cat "$W/conn-gtarget" 2>/dev/null)"
+elif ! pfctl -t Gaming_Servers -T test "${C_REMOTE%:*}" > /dev/null 2>&1; then
+    skip "gaming drops" "${C_REMOTE%:*} ($ghost) is not in Gaming_Servers"
+elif ! has_state "$C_LOCAL"; then
+    skip "gaming drops" "pf shows no state for the VM's own connection $C_LOCAL"
+else
+    T_LOCAL=$C_LOCAL
+    T_REMOTE=$C_REMOTE
+    VMIP=${T_LOCAL%:*}
+    CTL=
+    if conn gcontrol codeload.github.com 443 &&
+        ! pfctl -t Gaming_Servers -T test "${C_REMOTE%:*}" > /dev/null 2>&1 && has_state "$C_LOCAL"; then
+        CTL=$C_LOCAL
+    fi
+    out=$($PC add vm-self "$VMIP" off on 2>&1) || problem "add: $(oneline "$out")"
+    s=$(csync)
+    [ "$s" = OK ] || problem "sync: $s"
+    ! has_state "$T_LOCAL" || problem "the state $T_LOCAL -> $T_REMOTE is still there"
+    verdict "gaming drops: a newly blocked device loses its connection to a game server"
+    if [ -n "$CTL" ]; then
+        has_state "$CTL" || problem "the state $CTL to codeload.github.com was dropped too"
+        verdict "gaming drops: its other connections stay"
+    else
+        skip "gaming drops: its other connections stay" "no control connection to codeload.github.com:443"
+    fi
+    out=$($PC del vm-self 2>&1) || problem "delete: $(oneline "$out")"
+    s=$(csync)
+    [ "$s" = OK ] || problem "sync: $s"
+    ! listed NoGaming "$VMIP" || problem "$VMIP still in NoGaming"
+    verdict "gaming drops: the VM's address leaves NoGaming again"
+fi
+for _p in $CONNS; do stop "$_p"; done
+
+w=$($PC window vm-test -60 60 gaming 2>&1) || problem "window: $(oneline "$w")"
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+! listed NoGaming "$DEV" || problem "$DEV still in NoGaming"
+verdict "gaming schedule: inside the allowed window ($w) gaming is not blocked"
+w=$($PC window vm-test 60 120 gaming 2>&1) || problem "window: $(oneline "$w")"
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+listed NoGaming "$DEV" || problem "$DEV not in NoGaming"
+verdict "gaming schedule: outside the allowed window ($w) gaming is blocked"
+out=$($PC set vm-test gaming off 2>&1) || problem "set: $(oneline "$out")"
+s=$(csync)
+[ "$s" = OK ] || problem "sync: $s"
+[ -z "$(tbl NoGaming)" ] || problem "NoGaming: $(tbl NoGaming | tr '\n' ' ')"
+verdict "gaming: back to Not blocked, NoGaming is empty on the next sync"
+ST=$(configctl parentalcontrol status 2>&1)
+[ "$(sget gaming.in_use)" = false ] || problem "in_use: $(sget gaming.in_use)"
+[ "$(sget gaming.refreshed_at)" = null ] || problem "refreshed_at: $(sget gaming.refreshed_at)"
+verdict "gaming: status says gaming is not in use"
 
 # ---- 6. survives reload -------------------------------------------------------
 
