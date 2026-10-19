@@ -1,6 +1,6 @@
 # Gaming block: design
 
-Draft, 2026-10-19 · builds on the messaging block (`2026-10-18-messaging-block-design.md`,
+Approved by the maintainer, 2026-10-19 · builds on the messaging block (`2026-10-18-messaging-block-design.md`,
 0.1.0) and more messaging apps (`2026-10-19-more-messaging-apps-design.md`, 0.2.0, not
 merged yet) · target release 0.3.0.
 
