@@ -140,7 +140,9 @@
                            '<td>' + $('<div>').text(d.reason).html() + '</td>' +
                            '<td>' + badgeOf(d.blocked) + '</td>' +
                            '<td>' + badgeOf(d.messaging_blocked) +
-                           ' <small class="text-muted">' + esc(d.messaging_reason) + '</small></td></tr>';
+                           ' <small class="text-muted">' + esc(d.messaging_reason) + '</small></td>' +
+                           '<td>' + badgeOf(d.gaming_blocked) +
+                           ' <small class="text-muted">' + esc(d.gaming_reason) + '</small></td></tr>';
                 }).join('');
                 $("#status-body").html(rows);
                 $("#status-alias").text(data.alias + ' (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
@@ -153,25 +155,32 @@
                 }
                 $("#status-cron").html(warn.length
                     ? ' &middot; <span class="text-danger">' + warn.join(' &middot; ') + '</span>' : '');
+                // one summary for messaging and one for gaming, built the same way;
                 // refreshed_at is null both out of use and before the first
                 // refresh, so in_use decides which wording applies
-                var m = data.messaging || {};
-                var errs = m.errors || [];
-                var problems = errs.slice(0, 3).map(esc);
-                if (errs.length > 3) {
-                    problems.push("{{ lang._('and %s more') }}".replace('%s', esc(errs.length - 3)));
-                }
-                if (m.error) {
-                    problems.unshift('<span class="text-danger">' + esc(m.error) + '</span>');
-                }
-                $("#status-messaging").html(' &middot; ' + (m.in_use
-                    ? "{{ lang._('Messaging: %s server entries') }}".replace('%s', esc(m.entries)) + ' &middot; ' +
-                      (m.refreshed_at
-                          ? "{{ lang._('refreshed %s') }}".replace('%s', esc(new Date(m.refreshed_at * 1000)
-                              .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
-                          : "{{ lang._('not refreshed yet') }}")
-                    : "{{ lang._('Messaging: not in use') }}") +
-                    (problems.length ? ' &middot; ' + problems.join(' &middot; ') : ''));
+                var summary = function (c, entriesText, offText) {
+                    c = c || {};
+                    var errs = c.errors || [];
+                    var problems = errs.slice(0, 3).map(esc);
+                    if (errs.length > 3) {
+                        problems.push("{{ lang._('and %s more') }}".replace('%s', esc(errs.length - 3)));
+                    }
+                    if (c.error) {
+                        problems.unshift('<span class="text-danger">' + esc(c.error) + '</span>');
+                    }
+                    return ' &middot; ' + (c.in_use
+                        ? entriesText.replace('%s', esc(c.entries)) + ' &middot; ' +
+                          (c.refreshed_at
+                              ? "{{ lang._('refreshed %s') }}".replace('%s', esc(new Date(c.refreshed_at * 1000)
+                                  .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
+                              : "{{ lang._('not refreshed yet') }}")
+                        : offText) +
+                        (problems.length ? ' &middot; ' + problems.join(' &middot; ') : '');
+                };
+                $("#status-messaging").html(summary(data.messaging,
+                    "{{ lang._('Messaging: %s server entries') }}", "{{ lang._('Messaging: not in use') }}"));
+                $("#status-gaming").html(summary(data.gaming,
+                    "{{ lang._('Gaming: %s game-server entries') }}", "{{ lang._('Gaming: not in use') }}"));
             });
         };
         loadStatus();
@@ -224,6 +233,7 @@
                     <th data-column-id="allow_to" data-type="string" data-width="6em">{{ lang._('Until') }}</th>
                     <th data-column-id="override" data-type="string">{{ lang._('Override') }}</th>
                     <th data-column-id="messaging" data-type="string">{{ lang._('Messaging') }}</th>
+                    <th data-column-id="gaming" data-type="string">{{ lang._('Gaming') }}</th>
                     <th data-column-id="description" data-type="string" data-formatter="safe">{{ lang._('Description') }}</th>
                     <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
                 </tr>
@@ -232,7 +242,7 @@
             <tfoot>
                 <tr>
                     <td></td>
-                    <td colspan="11"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
+                    <td colspan="12"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
                 </tr>
             </tfoot>
         </table>
@@ -245,10 +255,11 @@
                     {# the summary row lives inside the table so it lines up with
                        the columns by construction, rather than by guessing padding #}
                     <tr>
-                        <th colspan="4" style="border-bottom: none;">
+                        <th colspan="5" style="border-bottom: none;">
                             {{ lang._('Alias') }}: <span id="status-alias">-</span>
                             <span id="status-cron" class="text-muted"></span>
                             <span id="status-messaging"></span>
+                            <span id="status-gaming"></span>
                         </th>
                         <th style="border-bottom: none; text-align: right;">
                             <button id="refreshStatus" type="button" class="btn btn-xs btn-default">
@@ -262,6 +273,7 @@
                         <th>{{ lang._('Reason') }}</th>
                         <th>{{ lang._('State') }}</th>
                         <th>{{ lang._('Messaging') }}</th>
+                        <th>{{ lang._('Gaming') }}</th>
                     </tr>
                 </thead>
                 <tbody id="status-body"></tbody>
