@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "safe_udp_ports": [
+    [53, 53], [123, 123], [443, 443], [500, 500], [3478, 3497], [4500, 4500], [8801, 8810], [10000, 10000],
+    [16384, 16387], [16393, 16402], [19302, 19309]
+  ],
+  "tcp_ports": [
+    [1119, 1120], [2099, 2099], [2567, 2567], [3724, 3724], [4530, 4533], [6112, 6119], [6695, 6709],
+    [7348, 7351], [7500, 7509], [7770, 7770], [7777, 7777], [7800, 7802], [7850, 7854], [8393, 8400],
+    [9090, 9093], [9339, 9339], [19090, 19093], [19132, 19133], [20500, 20500], [20510, 20510], [25565, 25565],
+    [27777, 27777], [28960, 28960], [30000, 30009], [37000, 37100], [50010, 50014], [65010, 65010],
+    [65050, 65050]
+  ],
+  "servers": {
+    "pokemon_go": {
+      "label": "Pokémon GO",
+      "hosts": ["pgorelease.nianticlabs.com"]
+    },
+    "honkai_impact_3rd": {
+      "label": "Honkai Impact 3rd",
+      "hosts": [
+        "outer-dp-overseas01.honkaiimpact3.com", "outer-dp-usa01.honkaiimpact3.com",
+        "outer-dp-jp01.honkaiimpact3.com", "outer-dp-kr01.honkaiimpact3.com", "outer-dp-asia01.honkaiimpact3.com",
+        "westglobal01.honkaiimpact3.com", "prelogin.global.honkaiimpact3.com", "account-west.honkaiimpact3.com"
+      ]
+    },
+    "infinity_nikki": {
+      "label": "Infinity Nikki",
+      "hosts": [
+        "x6us-gate.infoldgames.com", "x6en-gate.infoldgames.com", "x6tw-gate.infoldgames.com",
+        "x6asia-gate.infoldgames.com", "x6us-auth.infoldgames.com", "x6en-auth.infoldgames.com",
+        "x6tw-auth.infoldgames.com", "x6asia-auth.infoldgames.com"
+      ]
+    },
+    "love_and_deepspace": {
+      "label": "Love and Deepspace",
+      "hosts": [
+        "x3asia-gatesvr.infoldgames.com", "x3en-gatesvr.infoldgames.com", "x3us-gatesvr.infoldgames.com",
+        "x3tw-gatesvr.infoldgames.com", "x3asia-loginsvr.infoldgames.com", "x3en-loginsvr.infoldgames.com",
+        "x3us-loginsvr.infoldgames.com", "x3tw-loginsvr.infoldgames.com"
+      ]
+    },
+    "vivox": {
+      "label": "In-game voice chat (Vivox)",
+      "ranges": ["85.236.96.0/21", "85.236.104.0/23"]
+    }
+  },
+  "never_blocked": {
+    "discord": ["66.22.192.0/18"]
+  },
+  "alias_suffixes": [".elb.amazonaws.com"]
+}
