@@ -130,6 +130,22 @@ check('answers: alias to a CDN dropped',
     plainAnswers([$a('d1.cloudfront.net', '203.0.113.8')], 'www.game.example', $elb), []);
 check('answers: case and trailing dot ignored',
     plainAnswers([$a('Game.Example.', '203.0.113.9')], 'game.example', $elb), ['203.0.113.9']);
+/* a resolver that sinkholes a game's name answers 0.0.0.0 or a local block page;
+   blocking that would cut a device off a host on its own network */
+check('answers: a sinkhole answer is dropped',
+    plainAnswers([$a('game.example', '0.0.0.0'), $a('game.example', '192.168.1.2'),
+                  $a('game.example', '203.0.113.5')], 'game.example', $elb),
+    ['203.0.113.5']);
+
+/* ---- the game-servers table ------------------------------------------------ */
+
+check('destinations: learned plus ranges, unique, sorted',
+    gamingDestinations(['203.0.113.9' => 1, '198.51.100.7' => 2],
+        ['a' => ['label' => 'A', 'hosts' => ['a.example']], 'b' => ['label' => 'B', 'ranges' => ['203.0.113.0/28',
+        '192.0.2.0/24']], 'c' => ['label' => 'C', 'ranges' => ['203.0.113.0/28']]]),
+    ['192.0.2.0/24', '198.51.100.7', '203.0.113.0/28', '203.0.113.9']);
+check('destinations: a server without ranges adds nothing',
+    gamingDestinations([], ['a' => ['label' => 'A', 'hosts' => ['a.example']]]), []);
 
 /* ---- drop plan ------------------------------------------------------------- */
 

@@ -207,7 +207,7 @@ function writeCache(string $path, array $cache): void
     ], JSON_INVALID_UTF8_SUBSTITUTE);
     if ($json === false || @file_put_contents($tmp, $json) === false
         || !@chmod($tmp, 0600) || !@rename($tmp, $path)) {
-        fwrite(STDERR, 'messaging: cannot write ' . $path . "\n");
+        fwrite(STDERR, 'cannot write ' . $path . "\n");     /* the messaging or the gaming cache */
     }
 }
 
@@ -257,6 +257,108 @@ function dropMessagingStates(Backend $backend, array $targets, array $added, arr
         } catch (\Throwable $e) {
             $failures[] = "dropping connections of $target failed: " . $e->getMessage();
             fwrite(STDERR, 'messaging: ' . end($failures) . "\n");
+        }
+    }
+    return $failures;
+}
+
+/**
+ * Refresh the game-server list and load it into its table.
+ *
+ * Resolves gaming.json's game hosts, keeping only the answers that are the hosts'
+ * own (plainAnswers()) and not on a shared CDN; learns them for a week, as the
+ * messaging list does, since a game's load balancers change address; and makes the
+ * table hold them and the games' shipped ranges, each through acceptRange(). A
+ * failed lookup never empties the list.
+ *
+ * @param array<string, mixed> $gaming    gaming.json
+ * @param array<string>        $cdnRanges messaging.json's shared_cdn_ranges; [] when it is unreadable
+ * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
+ *        readCache() of the gaming cache
+ * @param bool $add false to only delete from the table (syncTable())
+ * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: list<string>, refreshed_at: int, errors: list<string>}}
+ *         this run's servers, the ones the table gained, and the cache to write
+ */
+function refreshGamingServers(Backend $backend, string $table, array $gaming, array $cdnRanges, array $cache, bool $add): array
+{
+    putenv('RES_OPTIONS=timeout:1 attempts:1');
+    $suffixes = array_values(array_filter((array)($gaming['alias_suffixes'] ?? []), 'is_string'));
+    $lookup = function (string $host) use ($suffixes) {
+        $records = @dns_get_record($host, DNS_A);
+        return $records === false ? false : plainAnswers($records, $host, $suffixes);
+    };
+    $servers = (array)($gaming['servers'] ?? []);
+    $hosts = [];
+    foreach ($servers as $server) {
+        $hosts = array_merge($hosts, array_filter((array)(((array)$server)['hosts'] ?? []), 'is_string'));
+    }
+    $found = resolveAll(array_values(array_unique($hosts)), $lookup, 10000, fn(): int => (int)(microtime(true) * 1000));
+    $hour = intdiv(time(), 3600) * 3600;
+    $learned = updateLearned($cache['learned'], $found['addresses'], ['addresses' => [], 'missing' => []],
+        $cdnRanges, $hour, 7 * 86400);
+    $checked = checkedRanges(['game servers' => gamingDestinations($learned, $servers)]);
+    $dest = $checked['ranges']['game servers'];
+    $diff = syncTable($backend, $table, $dest, $add);
+    printf("game servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
+
+    return [$dest, $diff['added'], [
+        'learned' => $learned,
+        'published' => [],
+        'protected' => [],
+        'apps' => [],
+        'refreshed_at' => time(),
+        'errors' => array_merge(refreshErrors([$found], [], []), $checked['errors'], $diff['errors']),
+    ]];
+}
+
+/**
+ * Drop the open connections that this run's gaming block should cut, as
+ * gamingDropPlan() says for each device in the gaming device table, so a match in
+ * progress ends. Nothing else is touched (see selectGamingStates()).
+ *
+ * Best effort, device by device, as dropMessagingStates(): a failure goes to STDERR
+ * and the next device is still done; an exception is also returned for status.
+ *
+ * @param array<string>          $targets      every address in the device table
+ * @param array<string>          $added        the ones added this run
+ * @param array<string>          $exempt       neverBlocked() of this run
+ * @param array<array{int, int}> $safeUdp      the safe-list
+ * @param array<array{int, int}> $tcpPorts     the game TCP ports
+ * @param array<string>          $servers      this run's game servers
+ * @param array<string>          $addedServers the game servers added this run
+ * @return list<string> the exceptions, one line each
+ */
+function dropGamingStates(Backend $backend, array $targets, array $added, array $exempt, array $safeUdp,
+    array $tcpPorts, array $servers, array $addedServers): array
+{
+    $failures = [];
+    foreach ($targets as $target) {
+        try {
+            $plan = gamingDropPlan($target, $added, $servers, $addedServers);
+            if ($plan === null) {
+                continue;
+            }
+            /* every state with the target on either side, as for messaging */
+            $raw = $backend->configdpRun('filter list states', [$target, '', '', '', '']);
+            $rows = json_decode((string)$raw, true)['details'] ?? null;
+            if (!is_array($rows)) {
+                fwrite(STDERR, "gaming: cannot list the connections of $target\n");
+                continue;
+            }
+            foreach (selectGamingStates($rows, $exempt, $safeUdp, $tcpPorts, $plan['servers'], $plan['ports']) as $id) {
+                /* "hexid/hexcreator", as core's own state page passes it */
+                if (!preg_match('/^([0-9a-f]+)\/([0-9a-f]+)$/i', $id, $m)) {
+                    fwrite(STDERR, "gaming: not a state id: $id\n");
+                    continue;
+                }
+                $answer = (string)$backend->configdpRun('filter kill state', [$m[1], $m[2]]);
+                if (!stateKilled($answer)) {
+                    fwrite(STDERR, "gaming: dropping state $id failed: " . trim($answer) . "\n");
+                }
+            }
+        } catch (\Throwable $e) {
+            $failures[] = "dropping connections of $target failed: " . $e->getMessage();
+            fwrite(STDERR, 'gaming: ' . end($failures) . "\n");
         }
     }
     return $failures;

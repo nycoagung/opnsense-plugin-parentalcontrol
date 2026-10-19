@@ -135,7 +135,9 @@ function exemptReady(array $tableEntries): bool
  * An answer counts when it is a plain record of the name asked, or comes through an
  * alias ending in one of $aliasSuffixes: a load balancer of the game's own. Through
  * any other alias - a CDN's - the address serves other sites too, and is left alone.
- * Names are compared case-insensitively, without a trailing dot.
+ * Names are compared case-insensitively, without a trailing dot. Only public
+ * addresses count (isPublicIpv4()): a resolver that sinkholes the name answers
+ * 0.0.0.0 or a local address.
  *
  * @param array<mixed> $records
  * @param array<string> $aliasSuffixes
@@ -154,11 +156,30 @@ function plainAnswers(array $records, string $host, array $aliasSuffixes): array
         foreach ($aliasSuffixes as $suffix) {
             $own = $own || str_ends_with($owner, strtolower($suffix));
         }
-        if ($own) {
+        if ($own && isPublicIpv4($record['ip'])) {
             $out[] = $record['ip'];
         }
     }
     return $out;
+}
+
+/**
+ * What the game-servers table holds: the addresses learned from the game hosts and
+ * every game's shipped ranges, each once, sorted.
+ *
+ * @param array<string, int>   $learned address => time last seen
+ * @param array<string, mixed> $servers gaming.json's servers
+ * @return list<string>
+ */
+function gamingDestinations(array $learned, array $servers): array
+{
+    $all = array_map('strval', array_keys($learned));
+    foreach ($servers as $server) {
+        $all = array_merge($all, array_filter((array)(((array)$server)['ranges'] ?? []), 'is_string'));
+    }
+    $all = array_values(array_unique($all));
+    sort($all, SORT_STRING);
+    return $all;
 }
 
 /**

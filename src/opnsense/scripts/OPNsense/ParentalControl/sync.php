@@ -535,6 +535,41 @@ function messagingObjectsProblem(array $aliases, array $rules): ?string
     return $problems === [] ? null : implode('; ', $problems);
 }
 
+/**
+ * What is wrong with the gaming objects, or null when nothing is, read the same way
+ * as messagingObjectsProblem(): the ones missing, then the aliases renamed in the GUI.
+ *
+ * @param list<array{name: string, description: string}> $aliases every alias
+ * @param list<array{name: string, description: string}> $rules   every rule
+ */
+function gamingObjectsProblem(array $aliases, array $rules): ?string
+{
+    $missing = [];
+    $renamed = [];
+    foreach (GAME_ALIASES as $name => $marker) {
+        $alias = findByMarker($aliases, $marker);
+        if ($alias === null) {
+            $missing[] = $marker;
+        } elseif ($alias['name'] !== $name) {
+            $renamed[] = "gaming alias renamed: {$alias['name']} should be $name";
+        }
+    }
+    foreach (array_keys(GAME_RULES) as $marker) {
+        if (findByMarker($rules, $marker) === null) {
+            $missing[] = $marker;
+        }
+    }
+
+    $problems = [];
+    if ($missing !== []) {
+        $problems[] = 'gaming objects missing: ' . implode(', ', $missing);
+    }
+    if ($renamed !== []) {
+        $problems[] = implode(', ', $renamed);
+    }
+    return $problems === [] ? null : implode('; ', $problems);
+}
+
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
     $aliases = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
@@ -549,6 +584,14 @@ if ($mode === 'status') {
             ?? (messagingData(MSG_DATA_FILE) === null ? MSG_DATA_MISSING : null);
     }
     $cache = readCache(MSG_CACHE_FILE);
+    /* gaming, read the same way */
+    $gameConflict = gamingConflict($aliases);
+    $gameError = $gameConflict;
+    if ($gameError === null && $gameInUse) {
+        $gameError = gamingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
+            ?? (gamingData(GAME_DATA_FILE) === null ? GAME_DATA_MISSING : null);
+    }
+    $gameCache = readCache(GAME_CACHE_FILE);
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -571,6 +614,19 @@ if ($mode === 'status') {
             'errors' => $msgInUse ? $cache['errors'] : [],
             /* refreshed_at is null both out of use and before the first refresh */
             'in_use' => $msgInUse,
+        ],
+        'gaming' => [
+            'error' => $gameError,
+            'devices_table' => GAME_DEVICES_ALIAS,
+            'servers_table' => GAME_SERVERS_ALIAS,
+            'exempt_table' => GAME_EXEMPT_ALIAS,
+            /* under a conflict those tables belong to someone else's aliases */
+            'entries' => $gameConflict === null ? count(tableContents($backend, GAME_SERVERS_ALIAS)) : 0,
+            'exempt_entries' => $gameConflict === null ? count(tableContents($backend, GAME_EXEMPT_ALIAS)) : 0,
+            'learned' => count($gameCache['learned']),
+            'refreshed_at' => $gameInUse ? $gameCache['refreshed_at'] : null,
+            'errors' => $gameInUse ? $gameCache['errors'] : [],
+            'in_use' => $gameInUse,
         ],
     ]);
     exit(0);
@@ -1013,6 +1069,10 @@ if ($msgObjectsOk) {
    denied gaming would lose its own network, DHCP and DNS. Only while in use, like
    the messaging list. */
 $gameErrors = [];
+$gameExempt = [];           /* this run's never-blocked destinations, for the drops */
+$gameServers = [];          /* this run's game servers */
+$gameAddedServers = [];     /* the game servers this run added to their table */
+$gameCache = null;          /* the cache this run writes; null when it did not refresh */
 if ($gameObjectsOk && $gameInUse && $gameData !== null) {
     $ifconfig = [];
     @exec('/sbin/ifconfig -a 2>/dev/null', $ifconfig);
@@ -1020,9 +1080,25 @@ if ($gameObjectsOk && $gameInUse && $gameData !== null) {
     if ($callNets === null) {
         $gameErrors[] = 'messaging data missing; calls in messaging apps are not exempted';
     }
-    $exemptDiff = syncTable($backend, GAME_EXEMPT_ALIAS,
-        neverBlocked(firewallIpv4(implode("\n", $ifconfig)), $gameData, $callNets), $addTo[GAME_EXEMPT_ALIAS]);
+    $gameExempt = neverBlocked(firewallIpv4(implode("\n", $ifconfig)), $gameData, $callNets);
+    $exemptDiff = syncTable($backend, GAME_EXEMPT_ALIAS, $gameExempt, $addTo[GAME_EXEMPT_ALIAS]);
     $gameErrors = array_merge($gameErrors, $exemptDiff['errors']);
+
+    /* then the game servers, before the device table, so a device newly denied
+       gaming meets this run's list */
+    $gameCache = readCache(GAME_CACHE_FILE);
+    try {
+        [$gameServers, $gameAddedServers, $gameCache] = refreshGamingServers(
+            $backend,
+            GAME_SERVERS_ALIAS,
+            $gameData,
+            array_values(array_filter((array)($callNets['shared_cdn_ranges'] ?? []), 'is_string')),
+            $gameCache,
+            $addTo[GAME_SERVERS_ALIAS]
+        );
+    } catch (\Throwable $e) {
+        $gameCache['errors'] = ['refresh failed: ' . $e->getMessage()];
+    }
 }
 
 /* The device table, every run, in use or not, as for messaging, and never under a
@@ -1042,7 +1118,25 @@ if ($gameObjectsOk) {
         count($gameDiff['removed'])
     );
     $gameErrors = array_merge($gameErrors, $gameDiff['errors']);
+
+    /* as for messaging, a new block also ends the games already being played */
+    if ($mdl->general->kill_states->isEqual('1') && $gameData !== null) {
+        /** @var array<array{int, int}> $safeUdp */
+        $safeUdp = $gameData['safe_udp_ports'];
+        /** @var array<array{int, int}> $tcpPorts */
+        $tcpPorts = $gameData['tcp_ports'];
+        $gameErrors = array_merge($gameErrors, dropGamingStates($backend, $gameWant, $gameDiff['added'],
+            $gameExempt, $safeUdp, $tcpPorts, $gameServers, $gameAddedServers));
+    }
 }
 foreach ($gameErrors as $error) {
     fwrite(STDERR, "gaming: $error\n");
+}
+/* status shows the errors the cache holds */
+if ($gameCache !== null) {
+    foreach ($gameCache['errors'] as $error) {
+        fwrite(STDERR, "gaming: $error\n");
+    }
+    $gameCache['errors'] = array_merge($gameCache['errors'], $gameErrors);
+    writeCache(GAME_CACHE_FILE, $gameCache);
 }
