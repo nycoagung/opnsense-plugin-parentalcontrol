@@ -192,6 +192,28 @@ check('ranges: private, local, shared and multicast space is rejected',
     parseRanges("192.0.0.0/8\n172.0.0.0/11\n100.0.0.0/9\n10.1.0.0/16\n127.0.0.0/8\n169.254.0.0/16\n"
         . "0.0.0.0/8\n224.0.0.0/8\n240.0.0.0/8\n192.168.30.7\n198.51.100.0/24\n"),
     ['198.51.100.0/24']);
+/* pf refuses a network with host bits set, and one refused entry fails a whole load */
+check('ranges: a downloaded range with host bits is listed in pf\'s own form',
+    parseRanges("203.0.113.5/24\n198.51.100.7/32\n"),
+    ['203.0.113.0/24', '198.51.100.7']);
+
+/* ---- acceptRange and checkedRanges ----------------------------------------- */
+
+check('ranges: a public range is accepted in pf\'s own form',
+    array_map('acceptRange', ['203.0.113.5/24', '198.51.100.7/32', '198.51.100.7', '198.0.0.0/8']),
+    ['203.0.113.0/24', '198.51.100.7', '198.51.100.7', '198.0.0.0/8']);
+/* pfctl reads a name, 'self' or an interface as something to look up or expand */
+check('ranges: names, interfaces, private space and anything wider than a /8 are refused',
+    array_map('acceptRange', ['self', 'igb1:network', '1.2.3.4 lo0', '', '10.0.0.0/7', '192.168.0.0/16',
+        '0.0.0.0/0', '64.0.0.0/7', '224.0.0.1', '100.64.0.0/10', '192.0.2.1/33']),
+    [null, null, null, null, null, null, null, null, null, null, null]);
+/* shipped, extra and site ranges reach the table too, so they pass the same check */
+check('ranges: every app range passes the same check, and what fails is reported',
+    checkedRanges(['x' => ['self', '203.0.113.5/24', '192.168.0.0/16', '203.0.113.0/24'],
+                   'y' => ['198.51.100.7/32']]),
+    ['ranges' => ['x' => ['203.0.113.0/24'], 'y' => ['198.51.100.7']],
+     'errors' => ['range self of x is not a public IPv4 network no wider than a /8; not blocked',
+                  'range 192.168.0.0/16 of x is not a public IPv4 network no wider than a /8; not blocked']]);
 
 /* ---- filterCandidates ------------------------------------------------------ */
 
@@ -689,6 +711,19 @@ check('cache: published entries are judged one by one',
         'j' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now, 'failed_at' => (string)$now],
     ]])['published'],
     ['t' => ['ranges' => ['198.51.100.0/24'], 'fetched_at' => $now]]);
+/* a damaged cache, or a download kept from a version without the range check, would
+   otherwise put private space into the servers table after a failed download */
+check('cache: a cached download that reaches private space, or is wider than a /8, is dropped',
+    sanitizeCache(['published' => [
+        't' => ['ranges' => ['198.51.100.0/24', '10.0.0.0/7'], 'fetched_at' => $now],
+        'u' => ['ranges' => ['0.0.0.0/0'], 'fetched_at' => $now],
+        'v' => ['ranges' => ['192.168.0.0/16'], 'fetched_at' => $now],
+        'w' => ['ranges' => ['203.0.113.0/28'], 'fetched_at' => $now],
+    ]])['published'],
+    ['w' => ['ranges' => ['203.0.113.0/28'], 'fetched_at' => $now]]);
+check('cache: a cached download not in pf\'s own form is dropped',
+    sanitizeCache(['published' => ['t' => ['ranges' => ['198.51.100.5/24'], 'fetched_at' => $now]]])['published'],
+    []);
 check('cache: a refresh time or errors of the wrong type are dropped',
     [sanitizeCache(['refreshed_at' => (string)$now, 'errors' => ['a', 7, null, 'b']]),
      sanitizeCache(['refreshed_at' => $now, 'errors' => 'a'])],

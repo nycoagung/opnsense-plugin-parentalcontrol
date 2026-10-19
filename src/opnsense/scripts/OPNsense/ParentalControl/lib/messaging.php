@@ -175,14 +175,59 @@ function reachesNonPublic(string $cidr): bool
 }
 
 /**
+ * A range a servers table may hold, in pf's own form (canonicalTarget()), or null.
+ *
+ * The one check every range passes on its way to a table, wherever it comes from: a
+ * download, the cache's last good copy, or the data shipped with the plugin. It must
+ * be an IPv4 address or network no wider than a /8, which no one service owns, and
+ * stay out of NON_PUBLIC_RANGES. pfctl reads a name, 'self' or an interface as
+ * something to look up or expand, so anything else is refused.
+ */
+function acceptRange(string $range): ?string
+{
+    if (!isIpv4Cidr($range)) {
+        return null;
+    }
+    $canonical = canonicalTarget($range);
+    if ((int)(explode('/', $canonical)[1] ?? 32) < 8 || reachesNonPublic($canonical)) {
+        return null;
+    }
+    return $canonical;
+}
+
+/**
+ * Each app's ranges after acceptRange(): accepted ones in pf's own form, each once,
+ * in input order, and a line for each one refused.
+ *
+ * @param array<string, array<string>> $ranges by app id
+ * @return array{ranges: array<string, list<string>>, errors: list<string>}
+ */
+function checkedRanges(array $ranges): array
+{
+    $kept = [];
+    $errors = [];
+    foreach ($ranges as $id => $list) {
+        $kept[$id] = [];
+        foreach ($list as $range) {
+            $accepted = acceptRange($range);
+            if ($accepted === null) {
+                $errors[] = "range $range of $id is not a public IPv4 network no wider than a /8; not blocked";
+            } elseif (!in_array($accepted, $kept[$id], true)) {
+                $kept[$id][] = $accepted;
+            }
+        }
+    }
+    return ['ranges' => $kept, 'errors' => $errors];
+}
+
+/**
  * The valid IPv4 ranges in a downloaded list: unique, in input order.
  *
- * One range per line. Blanks, # comments, IPv6 and anything else are skipped, so
- * a list that grows other kinds of line still parses, and so is a range wider than
- * a /8, which no one service owns, and one that reaches into a device's own network
- * (reachesNonPublic()). A page with markup in it is not a list at all - an error
- * page can have a line that looks like an address - so any '<' discards the whole
- * text.
+ * One range per line, kept in pf's own form. Blanks, # comments, IPv6 and anything
+ * else are skipped, so a list that grows other kinds of line still parses, and so is
+ * any range acceptRange() refuses. A page with markup in it is not a list at all -
+ * an error page can have a line that looks like an address - so any '<' discards
+ * the whole text.
  *
  * @return list<string>
  */
@@ -193,12 +238,12 @@ function parseRanges(string $text): array
     }
     $ranges = [];
     foreach (explode("\n", $text) as $line) {
-        $line = trim($line);
-        if (isIpv4Cidr($line) && (int)(explode('/', $line)[1] ?? 32) >= 8 && !reachesNonPublic($line)) {
-            $ranges[$line] = true;
+        $range = acceptRange(trim($line));
+        if ($range !== null) {
+            $ranges[$range] = true;
         }
     }
-    return array_keys($ranges);
+    return array_map('strval', array_keys($ranges));
 }
 
 /**
@@ -671,7 +716,9 @@ function sanitizeCache(mixed $raw): array
             || !array_is_list($entry['ranges']) || ($failedAt !== null && !is_int($failedAt))) {
             continue;
         }
-        $ranges = array_filter($entry['ranges'], fn($r): bool => is_string($r) && isIpv4Cidr($r));
+        /* in pf's own form and public, as parseRanges() keeps a download: a copy from
+           an older version or a damaged file is dropped, and downloaded again */
+        $ranges = array_filter($entry['ranges'], fn($r): bool => is_string($r) && acceptRange($r) === $r);
         if ($ranges === $entry['ranges']) {
             $published[$id] = ['ranges' => $ranges, 'fetched_at' => $entry['fetched_at']]
                 + ($failedAt === null ? [] : ['failed_at' => $failedAt]);

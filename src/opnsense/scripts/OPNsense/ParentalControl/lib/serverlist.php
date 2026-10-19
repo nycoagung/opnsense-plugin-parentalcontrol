@@ -99,17 +99,24 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
         downloadPublished(...)
     );
 
+    /* every range, the shipped ones too, passes the same check before it can reach the
+       table: a hand-edited or damaged data file must not cut devices off their LAN */
+    $apps = checkedRanges($published['ranges']);
+    $notify = checkedRanges([
+        'Apple notifications' => $data['notifications']['apple_ranges'],
+        'Windows notifications' => $data['notifications']['microsoft_ranges'],
+    ]);
     $ranges = filterRanges(
-        $published['ranges'],
-        array_merge($data['notifications']['apple_ranges'], $data['notifications']['microsoft_ranges']),
+        $apps['ranges'],
+        array_merge($notify['ranges']['Apple notifications'], $notify['ranges']['Windows notifications']),
         $guard['addresses']
     );
 
     $dest = destinationSet(
         $learned,
         $ranges['ranges'],
-        $data['notifications']['apple_ranges'],
-        $data['notifications']['microsoft_ranges']
+        $notify['ranges']['Apple notifications'],
+        $notify['ranges']['Windows notifications']
     );
     $diff = syncTable($backend, $table, $dest, $add);
     printf("messaging servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
@@ -122,6 +129,8 @@ function refreshServerList(Backend $backend, string $table, array $data, array $
         'refreshed_at' => time(),
         'errors' => array_merge(
             refreshErrors([$found, $answered], $published['failed'], $guard['missing']),
+            $apps['errors'],
+            $notify['errors'],
             $ranges['errors'],
             $diff['errors']
         ),
