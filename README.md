@@ -200,7 +200,8 @@ filter, depending on nothing outside OPNsense core:
   cannot take WhatsApp with it, and selecting both blocks both. A protected name
   without an owner is protected whichever apps are selected.
 
-A change takes effect on Apply or within the one-minute cycle.
+A change takes effect on Apply or within the one-minute cycle. The Settings tab
+has no Save button: Apply saves its settings, when they changed, then applies them.
 
 ### Status
 
@@ -358,8 +359,8 @@ selection, so a firewall that blocked all five apps blocks all eight. **From the
 first sync after the upgrade, a device denied messaging also loses Facebook,
 Instagram, Messenger, Viber and KakaoTalk, with the services they take with them
 (see The apps), for as long as it is denied.** Deselect any of them under Settings
-if that is not wanted. A selection that was saved empty stays empty, and nothing
-else in the settings changes.
+and press Apply if that is not wanted. A selection that was saved empty stays
+empty, and nothing else in the settings changes.
 
 ## Keeping it installed
 
@@ -609,8 +610,12 @@ model classes over scratch `config.xml` files, with only a pass-through of
 Phalcon's validation standing in (core's own validators ran): 0.1.0's five apps
 became all eight, an empty selection stayed empty, a partial one gained the missing
 apps once, sorted, 0.0.2's settings got all eight, and settings already at 1.2.0
-were left alone. Those harnesses are scratch tools and not in the repository. They
-show that the logic does what it should, not that OPNsense agrees.
+were left alone. The Settings tab's Apply ran in headless Chrome with core 26.7.7's
+own jQuery, Bootstrap, token field and form scripts and a stubbed API: it saves
+changed settings before applying, saves nothing when they did not change or have
+not loaded yet, and on a validation error applies nothing and brings up the tab.
+Those harnesses are scratch tools and not in the repository. They show that the
+logic does what it should, not that OPNsense agrees.
 
 **On OPNsense.** 0.1.0 was installed on a live OPNsense 26.7.7 firewall from its
 branch, and sections 4 to 7 of the device checklist passed with one Android phone:

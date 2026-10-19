@@ -101,20 +101,18 @@
             });
         });
 
+        /* the Settings tab as last loaded or saved; null until it has loaded */
+        var savedSettings = null;
         var data_get_map = {'frm_general': "/api/parentalcontrol/settings/get"};
         mapDataToFormUI(data_get_map).done(function () {
             formatTokenizersUI();
             $('.selectpicker').selectpicker('refresh');
-        });
-
-        $("#saveAct").click(function () {
-            saveFormToEndpoint("/api/parentalcontrol/settings/set", 'frm_general', function () {
-                /* applying is the Apply button's job - it owns the standard
-                   "changes have been applied" message and its placement */
-                $("#change_message_base_form").slideDown(1000, function () {
-                    setTimeout(function () { $("#change_message_base_form").slideUp(2000); }, 2000);
-                });
-            }, true);
+            savedSettings = JSON.stringify(getFormData('frm_general'));
+            /* the Apply bar's reminder, as the devices grid shows it after a save;
+               core's token field reports its changes as change events too */
+            $('#frm_general').on('change', function () {
+                $(document).trigger('settings-changed');
+            });
         });
 
         // Resolved state comes from the same script the cron run uses, so the
@@ -180,8 +178,25 @@
         $("#refreshStatus").click(function () { loadStatus(); });
 
         /* base_apply_button only emits the markup; without this the button has
-           no label and does nothing */
+           no label and does nothing. Apply also saves the Settings tab, which has
+           no Save button: only when it changed, so an Apply after a device edit
+           adds no configuration revision. An invalid setting stops the Apply, and
+           core's validation handling brings up the tab (settings_tab). */
         $("#reconfigureAct").SimpleActionButton({
+            onPreAction: function () {
+                var dfObj = new $.Deferred();
+                var settings = JSON.stringify(getFormData('frm_general'));
+                if (savedSettings === null || settings === savedSettings) {
+                    return dfObj.resolve();
+                }
+                saveFormToEndpoint("/api/parentalcontrol/settings/set", 'frm_general', function () {
+                    savedSettings = settings;
+                    dfObj.resolve();
+                }, true, function () {
+                    dfObj.reject();
+                });
+                return dfObj;
+            },
             onAction: function () { loadStatus(); }
         });
     });
@@ -190,7 +205,7 @@
 <ul class="nav nav-tabs" role="tablist" id="maintabs">
     <li class="active"><a data-toggle="tab" href="#devices">{{ lang._('Devices') }}</a></li>
     <li><a data-toggle="tab" href="#status">{{ lang._('Status') }}</a></li>
-    <li><a data-toggle="tab" href="#settings">{{ lang._('Settings') }}</a></li>
+    <li><a data-toggle="tab" id="settings_tab" href="#settings">{{ lang._('Settings') }}</a></li>
 </ul>
 
 <div class="tab-content content-box">
@@ -256,13 +271,6 @@
 
     <div id="settings" class="tab-pane fade in">
         {{ partial("layout_partials/base_form", ['fields': generalForm, 'id': 'frm_general']) }}
-        <div class="col-md-12">
-            <hr/>
-            <button class="btn btn-primary" id="saveAct" type="button">
-                <b>{{ lang._('Save') }}</b>
-                <i id="saveAct_progress" class=""></i>
-            </button>
-        </div>
     </div>
 </div>
 

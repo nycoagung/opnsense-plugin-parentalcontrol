@@ -53,6 +53,11 @@ line above needs only one run.
 - [ ] Its help text says that Facebook & Instagram blocks the whole Facebook,
       Instagram and Messenger apps, and that KakaoTalk also blocks other Kakao
       services.
+- [ ] The Settings tab has no Save button. Changing a setting shows the reminder
+      to apply on the Apply bar, and Apply saves the settings, then applies them.
+- [ ] On the Devices tab, with `NoMessaging` typed as the Alias name under
+      Settings, Apply brings up the Settings tab with that field marked, and
+      nothing is applied. Put the old name back and press Apply.
 - [ ] Status tab: a **Messaging** column for each device, with a badge and the
       reason.
 - [ ] With no enabled device using messaging, the summary line says
@@ -63,7 +68,7 @@ line above needs only one run.
 1. On the test device, open a chat in each app on the list that it has, and leave
    it open. In one of them, say WhatsApp, start a voice call with the second device
    and keep it going through Apply.
-2. Under Settings, keep all eight apps selected and press Save.
+2. Under Settings, keep all eight apps selected.
 3. Under Devices, edit the device at `<device-ip>`. Set Mode to Always allowed, so
    that its internet schedule cannot cut everything and make a check pass or fail
    for the wrong reason. Set Messaging to Blocked, save, then press Apply.
@@ -169,24 +174,23 @@ stays Always allowed, so the window steers only messaging, not the device's inte
 
 With the test device set to Blocked:
 
-- [ ] Deselect one app under Settings, for example Telegram, press Save, then
-      Apply. Within about a minute that app works again, and the others stay
-      blocked.
-- [ ] Deselect every app, press Save, then reload the page. The field stays empty;
+- [ ] Deselect one app under Settings, for example Telegram, and press Apply.
+      Within about a minute that app works again, and the others stay blocked.
+- [ ] Deselect every app, press Apply, then reload the page. The field stays empty;
       it is not refilled with the default apps.
 - [ ] With no app selected, the apps work on the blocked device, but its
       notifications are still cut.
 
 ### Only Facebook & Instagram selected
 
-Select only Facebook & Instagram, press Save, then Apply.
+Select only Facebook & Instagram and press Apply.
 
 - [ ] WhatsApp works: messages and calls.
 - [ ] Facebook, Instagram and Messenger stay blocked.
 
 ### Only WhatsApp selected
 
-Select only WhatsApp, press Save, then Apply.
+Select only WhatsApp and press Apply.
 
 - [ ] Facebook works.
 - [ ] Instagram works, including its direct messages, and its images and videos
@@ -199,7 +203,7 @@ Select only WhatsApp, press Save, then Apply.
 
 ### All eight again
 
-- [ ] Select all eight apps again, press Save, then Apply.
+- [ ] Select all eight apps again and press Apply.
 
 ## 11 Reboot
 

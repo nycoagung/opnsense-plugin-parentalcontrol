@@ -34,6 +34,8 @@ Plugin Changelog
   one
 * Viber's and KakaoTalk's networks ship with the plugin, built from ARIN's
   registry and from the prefixes Kakao announces
+* The Settings tab has no Save button any more: Apply saves the settings when
+  they changed, then applies them, and an invalid setting stops it
 
 0.1.0
 

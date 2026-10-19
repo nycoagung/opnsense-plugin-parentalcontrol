@@ -112,3 +112,4 @@ The exact help wording, the generator's download code, the order inside the non-
 ## Changes made during implementation
 
 - The generator's app-range checks (public, no prefix shorter than /8, no overlap with the shared-CDN list or the notification ranges) also run on Telegram's published list at build time, so every shipped app range meets one floor whatever its source. Telegram's list is still read as published, not merged.
+- At the maintainer's request (2026-10-19): the Settings tab's Save button is gone. Apply saves the settings when they changed since they were loaded or last saved, then applies; an invalid setting stops the Apply and brings up the Settings tab with the field marked. Changing a setting shows core's reminder to apply.
