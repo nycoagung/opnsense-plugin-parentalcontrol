@@ -32,7 +32,9 @@ class M1_2_0 extends BaseModelMigration
         return implode(',', $apps);
     }
 
-    public function run($model)
+    /* $model stays untyped: core's BaseModelMigration::run() declares no type, and an
+       override may not narrow it */
+    public function run($model): void
     {
         parent::run($model);
         $field = $model->general->messaging_apps;

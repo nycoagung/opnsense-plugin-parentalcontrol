@@ -108,3 +108,7 @@ The exact help wording, the generator's download code, the order inside the non-
 ## Branch
 
 `more-messaging-apps`, from `messaging-block` at 80677ab. Release 0.2.0 after the maintainer's decision on 0.1.0.
+
+## Changes made during implementation
+
+- The generator's app-range checks (public, no prefix shorter than /8, no overlap with the shared-CDN list or the notification ranges) also run on Telegram's published list at build time, so every shipped app range meets one floor whatever its source. Telegram's list is still read as published, not merged.

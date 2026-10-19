@@ -111,30 +111,38 @@ stop with all of them for as long as the block lasts. Ordinary phone calls and S
 over the mobile network still work. There is no switch for this: it is part of
 every messaging block. Notifications held back may all arrive when it lifts.
 
-Apart from that, nothing else on the device is touched: web browsing, video,
-iCloud, the app stores, school and work tools such as Teams, and Facebook and
-Instagram, which are not on the list, keep working.
+Apart from that and the selected apps, nothing else on the device is touched: web
+browsing, video, iCloud, the app stores and school and work tools such as Teams keep
+working. Two of the apps take more with them; see The apps.
 
 ### The apps
 
-Offered: **WhatsApp, Telegram, Snapchat, Signal and LINE**. An app is offered only
-where its servers are its own, so that blocking them takes nothing unrelated with
-it. That is why Snapchat's and Signal's content-delivery names, which sit on shared
-front ends, are left out of their lists.
+Offered: **WhatsApp, Telegram, Snapchat, Signal, LINE, Viber, KakaoTalk, and
+Facebook & Instagram**. An app is offered only where its servers are its own, so
+that blocking them takes nothing unrelated with it. That is why Snapchat's and
+Signal's content-delivery names, which sit on shared front ends, are left out of
+their lists. Two entries take more with them, on a blocked device only:
+
+- **Facebook & Instagram** blocks the whole Facebook, Instagram and Messenger apps,
+  and their websites. Messenger and Instagram's direct messages run on the same
+  servers as the rest of each app, so the network can only block them whole. It
+  also takes Threads, Meta AI, meta.com and its Accounts Center, "Log in with
+  Facebook" on other sites and apps, and signing in to a Meta Quest from that
+  device.
+- **KakaoTalk** hands its chat and call servers to the app as bare addresses,
+  never through DNS, so it can only be blocked by Kakao's own address space. That
+  also takes other Kakao services: Daum, Tistory, Melon, Kakao Map, Kakao
+  Developers and "Log in with Kakao".
 
 Not offered, and why:
 
 | App | Why not |
 |---|---|
-| Messenger | its servers share an address with Facebook's Graph API, which the Facebook app and "Log in with Facebook" in other apps rely on |
 | Discord | it sits behind Cloudflare's shared front end |
 | Kik | it sits behind Fastly's shared front end |
 | WeChat | its servers are Tencent's shared infrastructure |
-| Viber | its chat servers could not be identified |
 
-Facebook's and Instagram's direct messages cannot be blocked on their own either:
-their chat runs on the same servers as the rest of each app, so the network could
-only block the whole app. Teams, Skype and Slack are not on the list.
+Teams, Skype and Slack are not on the list.
 
 ### Where the block happens
 
@@ -148,8 +156,10 @@ filter, depending on nothing outside OPNsense core:
 - **Names to addresses.** The apps' server names are in a data file shipped with
   the plugin, `messaging.json`. While some device uses messaging they are
   resolved every minute through the firewall's own resolver, the notification
-  services' names first so that a slow resolver cannot starve them. Lookups are
-  limited in time, and the names not reached are reported.
+  services' names first so that a slow resolver cannot starve them, then the
+  apps' names in turns, one name of each app at a time, so that an app with a
+  long list cannot starve one with a short list. Lookups are limited in time,
+  and the names not reached are reported.
 - **Remembering.** An address is kept for **7 days** after it was last seen,
   because the apps' names rotate through pools of short-lived addresses. The list
   survives a reboot: it lives in `/var/db/parentalcontrol`, outside `config.xml`.
@@ -160,22 +170,35 @@ filter, depending on nothing outside OPNsense core:
   day, with an hour's wait after a failed download. The last good copy, then the
   copy shipped with the plugin, stand in for a download that fails. A downloaded
   range wider than a /8 is ignored.
+- **Shipped ranges.** Viber's and KakaoTalk's networks ship with the plugin and
+  are not downloaded: the networks registered to Viber in ARIN's registry, and
+  the address blocks Kakao announces from its own networks (AS7625, AS18160,
+  AS38099 and AS152199). They change only with a new release.
 - **Never emptied.** A failed lookup or download does not empty the list, and the
   errors show in Status.
-- **Protected names.** A list of names that must never be blocked (Facebook and
-  Instagram, iCloud, Google, Microsoft sign-in and the like) is resolved on every
-  run, and an address one of them resolves to is never learned. Neither is any
-  address inside a shared-CDN range (Cloudflare, Fastly, Akamai, Amazon
-  CloudFront); those ranges ship with the plugin, so this guard works offline.
-  Addresses already learned are checked again every run. If a protected name
-  cannot be resolved and nothing recent is remembered for it, learning pauses: the
-  plugin cannot tell whether an address it finds is shared with that name, so it
-  learns nothing new until the name resolves again, and Status says "learning
-  paused: no answer for …". The guard also looks inside ranges: an app's
-  published range (Telegram's) that holds a protected name's address is left out
-  ("range … holds protected address …; not blocked"), while a notification range
-  that holds one stays blocked, because the notification cut wins, and Status
-  names it too.
+- **Protected names.** A list of names that must never be blocked (iCloud,
+  Google, Microsoft sign-in and the like) is resolved on every run, and an
+  address one of them resolves to is never learned. Neither is any address inside
+  a shared-CDN range (Cloudflare, Fastly, Akamai, Amazon CloudFront); those
+  ranges ship with the plugin, so this guard works offline. Addresses already
+  learned are checked again every run. If a protected name cannot be resolved and
+  nothing recent is remembered for it, learning pauses: the plugin cannot tell
+  whether an address it finds is shared with that name, so it learns nothing new
+  until the name resolves again, and Status says "learning paused: no answer for
+  …". The guard also looks inside ranges: an app's range (Telegram's downloaded
+  ones, Viber's and KakaoTalk's shipped ones) that holds a protected name's
+  address is left out ("range … holds protected address …; not blocked"), while a
+  notification range that holds one stays blocked, because the notification cut
+  wins, and Status names it too.
+- **Protected names with an owner.** Some protected names belong to an app on the
+  list: Facebook's and Instagram's main names (`facebook.com`,
+  `www.facebook.com`, `graph.facebook.com`, `edge-mqtt.facebook.com`,
+  `www.instagram.com`, `i.instagram.com`) to Facebook & Instagram, and
+  `g.whatsapp.net`, `web.whatsapp.com` and `mmg.whatsapp.net` to WhatsApp. Such a
+  name is protected only while its app is not selected. So blocking WhatsApp alone
+  cannot take Facebook or Instagram with it, blocking Facebook & Instagram alone
+  cannot take WhatsApp with it, and selecting both blocks both. A protected name
+  without an owner is protected whichever apps are selected.
 
 A change takes effect on Apply or within the one-minute cycle.
 
@@ -325,6 +348,19 @@ under Install, which runs the new release's installer from the start. From 0.1.0
 on this cannot recur, because an installed installer hands over to the downloaded
 release's own.
 
+## Upgrading from 0.1.0
+
+One install run is enough: 0.1.0's installer hands over to the downloaded one,
+which also migrates the saved settings, because the settings model changed.
+
+The migration adds Facebook & Instagram, KakaoTalk and Viber to a saved app
+selection, so a firewall that blocked all five apps blocks all eight. **From the
+first sync after the upgrade, a device denied messaging also loses Facebook,
+Instagram, Messenger, Viber and KakaoTalk, with the services they take with them
+(see The apps), for as long as it is denied.** Deselect any of them under Settings
+if that is not wanted. A selection that was saved empty stays empty, and nothing
+else in the settings changes.
+
 ## Keeping it installed
 
 These files are not owned by a package, so a firmware upgrade can remove them.
@@ -435,6 +471,19 @@ Blocking messaging is by server address, which sets its limits:
   caught.
 - Blocking is by server address, not by app, so a selected app's web version is
   blocked too.
+- Facebook & Instagram and KakaoTalk take other services with them on a blocked
+  device: Threads, Meta AI, "Log in with Facebook" and the rest, and other Kakao
+  services such as Daum and Kakao Map (see The apps).
+- Meta also serves photos and videos from caches inside internet providers'
+  networks, which are not blocked. The apps still stop, because their own servers
+  are blocked, but a photo linked from elsewhere may still load.
+- Viber has a proxy setting of its own, which gets around the block. Viber calls
+  may also still connect: its call relays could not all be identified.
+- When Messenger signs in on a device for the first time, its one-time setup of
+  encrypted chats may use `v.whatsapp.net`, which is on WhatsApp's list. With
+  WhatsApp selected and Facebook & Instagram not, that setup may fail on a blocked
+  device. This comes from Messenger's public client code and has not been seen on
+  a device.
 - While a device is denied messaging it gets no notifications from any app, no
   iMessage and no incoming FaceTime calls. Ordinary phone calls and SMS over the
   mobile network still work. Notifications held back during the block may all
@@ -444,8 +493,8 @@ Blocking messaging is by server address, which sets its limits:
   push or some desktop clients, is not covered.
 - Phones that use a manufacturer's own notification service instead of Google's, as
   some phones sold in China do, are not covered.
-- Apple's ranges and Microsoft's list are only as current as the installed plugin
-  version.
+- Apple's ranges, Microsoft's list, and Viber's and KakaoTalk's networks are only
+  as current as the installed plugin version.
 - The list of apps is one for every device: there is no per-device choice.
 - While a device uses messaging and the firewall's own resolver is failing, each
   per-minute sync spends up to about 30 to 40 seconds on lookups while it holds its
@@ -464,11 +513,10 @@ renaming the alias in both directions, confirming the aliases rename in place, t
 rule follows, the old pf table is flushed, no duplicate pair appears and
 enforcement never lapses.
 
-**Release 0.1.0 (messaging), so far.** Four test files, which need no OPNsense and
-no network, only PHP 8.1 or later (with its dom, ctype, filter and SimpleXML
-extensions) and Python 3:
+**Tests.** Five test files, which need no OPNsense and no network, only PHP 8.1 or
+later (with its dom, ctype, filter and SimpleXML extensions) and Python 3:
 
-    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; python3 -I tests/BuildMessagingDataTest.py
+    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; python3 -I tests/BuildMessagingDataTest.py
 
 Each prints a line per check and exits 1 when one fails. All pass, re-run on
 2026-10-19:
@@ -476,9 +524,10 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | File | Checks | What it covers |
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
-| `tests/MessagingTest.php` | 155 | the messaging decision, the IPv4 helpers, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/MessagingDataTest.php` | 22 | `messaging.json`: no protected name, private range or shared-CDN range in it, a host name for every app, the notification ranges and names and the Facebook and Instagram protected names pinned, and its agreement with the settings model |
-| `tests/BuildMessagingDataTest.py` | 3 | which part of Microsoft's list the data generator turns into ranges |
+| `tests/MessagingTest.php` | 161 | the messaging decision, the IPv4 helpers, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
+| `tests/MessagingDataTest.php` | 32 | `messaging.json`: no private range or shared-CDN range in it, a host name for every app, a protected name listed by an app only when that app owns it, the owners, Viber's and KakaoTalk's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
+| `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
+| `tests/BuildMessagingDataTest.py` | 20 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and checks them, and its check of the protected names' owners |
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
@@ -493,30 +542,40 @@ rule's ports, every one caught. In the first three library stages each of
 the 89 checks was shown failing under at least one broken copy. Every broken copy
 was caught except seven in `MessagingTest.php`: five behave the same as the
 original on every input that can occur, and two fold the case of alias names,
-which the tests leave open on purpose.
+which the tests leave open on purpose. For 0.2.0, 17 more broken copies were all
+caught: 4 of the library, 3 of the generator, 8 of the data file and 2 of the
+migration.
 
-**Static analysis (0.1.0)**, on 2026-10-18, with PHPStan run again on 2026-10-19.
-PHPStan 2.3.1 at its strictest level (9), over the plugin's scripts, library files,
-`controllers/` and model, with OPNsense core 26.7.7's sources and the plugin's own
-library files and model on its scan path, reports 84 findings, none of them a
+**Static analysis (0.2.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
+(9), over the plugin's scripts, library files, `controllers/` and model, its
+migration included, with OPNsense core 26.7.7's sources and the plugin's own
+library files and model on its scan path, reports 86 findings, none of them a
 defect:
 
-- 66 are what it cannot follow in the framework: model fields reached through
+- 67 are what it cannot follow in the framework: model fields reached through
   `__get` and iterators typed as `mixed` (35), `Config::getInstance()` typed as
   plain `object` (6), Phalcon's view and core's own docblocks naming classes that
   do not exist (10), core's `getModel()` documented as possibly null though it
-  never is (2), `config.inc` on PHP's include path (4), and the API actions' JSON
-  arrays having no declared value types (9).
-- 18 are new in this release, all in `lib/serverlist.php`: the messaging data file
-  and the state listing that configd returns are decoded from JSON, which PHPStan
-  types as `mixed`, so it cannot check the calls that take their parts. The data
-  file's shape is pinned by `tests/MessagingDataTest.php`, a state row missing a
-  key is ignored by `selectStatesToDrop()`, and a damaged data file ends in the
-  refresh's own error handling, which Status shows, never in the internet block.
+  never is (2), `config.inc` on PHP's include path (4), the API actions' JSON
+  arrays having no declared value types (9), and the migration's `run()`
+  parameter, which core's migration base class leaves untyped and an override may
+  not narrow (1).
+- 18 are in `lib/serverlist.php`: the messaging data file and the state listing
+  that configd returns are decoded from JSON, which PHPStan types as `mixed`, so it
+  cannot check the calls that take their parts. The data file's shape is pinned by
+  `tests/MessagingDataTest.php`, a state row missing a key is ignored by
+  `selectStatesToDrop()`, and a damaged data file ends in the refresh's own error
+  handling, which Status shows, never in the internet block.
+- 1 is in `lib/messaging.php`: `messagingHosts()` passes each app's host list
+  through `array_values()`, which the list's declared type makes look redundant.
+  The list comes from the same JSON, which is not checked entry by entry, and the
+  apps' turns read it by position, so the call stays.
+
+0.1.0 had 84; the new ones are the migration's and `array_values()`'s.
 
 Semgrep 1.181.0, with its default, PHP, JavaScript, Python, secrets and
 security-audit rule sets, run over everything git tracks but the tests (which it
-skips), reports three findings:
+skips), reports the same three findings as for 0.1.0:
 
 - `exec-use` on the `pfctl -k` call in `sync.php` that drops a blocked device's
   connections. Its argument goes through `escapeshellarg()` and can only be an
@@ -525,11 +584,14 @@ skips), reports three findings:
 - `unlink-use` in `uninstall.php`, on the shutdown function that removes the
   marker. Its argument is the constant path of the marker, never input.
 - `dynamic-urllib-use-detected` in `tools/build-messaging-data.py`. Every URL the
-  generator opens has a fixed scheme and host: they come from the committed
-  `tools/messaging-sources.json`, all of them `https`, or from the
-  `https://stat.ripe.net/` template, whose two variables are the `call`, one of the
-  two the code names (`network-info` and `as-overview`), and the `resource`, an
-  address or an AS number. It is a maintainer's tool and is never installed.
+  generator opens has a fixed scheme and host: it comes from the committed
+  `tools/messaging-sources.json`, all of them `https`, or is built on one of two
+  fixed `https` templates. RIPEstat's,
+  `https://stat.ripe.net/data/<call>/data.json?resource=<resource>`, takes one of
+  the three calls the code names (`network-info`, `as-overview` and
+  `announced-prefixes`) and an address or an AS number; ARIN's,
+  `https://whois.arin.net/rest/nets;name=<name>`, takes a network name from the
+  sources file. It is a maintainer's tool and is never installed.
 
 Semgrep's bash parser also cannot read `install.sh` in full (`sh -n` and `dash -n`
 are clean on every script). Every function, API action, configd action and
@@ -541,17 +603,31 @@ configd classes through dozens of scenarios (a first use, a name conflict, a dea
 resolver, an unwritable cache, a refusal, a running sync, signals, a missing
 library file). The Status tab's script was rendered in headless Chrome against
 fixture data, and the installer's hand-over and the upgrade from 0.0.2 were run with
-a fake download against the real installers in scratch directories. Those
-harnesses are scratch tools and not in the repository. They show that the logic does
-what it should, not that OPNsense agrees.
+a fake download against the real installers in scratch directories. For 0.2.0, the
+settings migration ran through OPNsense core 26.7.7's own `run_migrations.php` and
+model classes over scratch `config.xml` files, with only a pass-through of
+Phalcon's validation standing in (core's own validators ran): 0.1.0's five apps
+became all eight, an empty selection stayed empty, a partial one gained the missing
+apps once, sorted, 0.0.2's settings got all eight, and settings already at 1.2.0
+were left alone. Those harnesses are scratch tools and not in the repository. They
+show that the logic does what it should, not that OPNsense agrees.
+
+**On OPNsense.** 0.1.0 was installed on a live OPNsense 26.7.7 firewall from its
+branch, and sections 4 to 7 of the device checklist passed with one Android phone:
+its messaging apps failed, no notification arrived, and the rest of its internet
+and the other devices kept working. That run found that OPNsense turns PHP's URL
+downloads off (`allow_url_fopen`), so Telegram's ranges could not be downloaded;
+downloads now use PHP's curl extension, which OPNsense core depends on.
 
 **Still to come:** the run of `tests/vm/uninstall-test.sh` on a disposable OPNsense
 26.7 virtual machine (it saves `config.xml`, installs, exercises all three
-settings, uninstalls with and without `--purge`, and compares `config.xml` with the
-saved copy), and the device checks in `docs/testing/messaging-block.md`: each app,
-the notification cut, the schedule and a reboot. Until they have been done, nothing
-in 0.1.0 has been run on OPNsense itself. Their results are added here when they
-exist.
+settings, checks that every app is selected by default and that the migration adds
+the new apps to a saved selection, uninstalls with and without `--purge`, and
+compares `config.xml` with the saved copy); the rest of the device checklist for
+0.1.0 (back to Not blocked, the schedule, choosing apps, a reboot, the status page
+and the uninstall rehearsal); and the whole checklist for 0.2.0, including Viber,
+KakaoTalk, Facebook & Instagram and the two sections with a single app selected.
+Their results are added here when they exist.
 
 **Not implemented:** IPv6 blocking — see Requirements below.
 
@@ -580,23 +656,40 @@ servers is generated and then committed:
     python3 -I tools/build-messaging-data.py --out src/opnsense/scripts/OPNsense/ParentalControl/messaging.json
 
 The generator takes the hand-maintained part from `tools/messaging-sources.json`
-(each app's host names, the protected names, Apple's ranges, Google's names and
-ports, and the pinned Microsoft file) and downloads the rest: Telegram's ranges,
-the shared CDNs' ranges (Cloudflare, Fastly, Amazon CloudFront, and Akamai's
-announced prefixes from RIPEstat) and Microsoft's Windows Notification Service
-list. A failed download, an entry that is not an address range, a Microsoft file
-without its client section, or a list that comes out empty stops it with exit
-status 1 before anything is written. `--wns FILE` reads a local copy of Microsoft's
-file instead of downloading it. Read the diff, and run the tests, before
-committing the result.
+(each app's host names and where its ranges come from, the protected names and
+their owners, Apple's ranges, Google's names and ports, and the pinned Microsoft
+file) and downloads the rest: Telegram's ranges; the networks of each app with
+`ranges_sources`, merged, which are Viber's networks from ARIN's registry by
+network name (`{"arin_name": "AWS-VIBER"}`) and Kakao's announced prefixes from
+RIPEstat by AS number (`{"ripestat_asn": 7625}`); the shared CDNs' ranges
+(Cloudflare, Fastly, Amazon CloudFront, and Akamai's announced prefixes from
+RIPEstat); and Microsoft's Windows Notification Service list. It stops with exit
+status 1 before anything is written on a failed download, an entry that is not an
+address range, a Microsoft file without its client section, a list that comes out
+empty, an app range that is not public, is wider than a /8 or overlaps a shared CDN
+or a notification range, or an owner given for a name that is not protected or
+naming no app. `--wns FILE` reads a local copy of Microsoft's file instead of
+downloading it. Read the diff, and run the tests, before committing the result.
 
     python3 -I tools/build-messaging-data.py --check
 
 resolves every app, notification and protected host name through this machine's
 resolver and prints each address with its network and owner and what the guard
-would do with it (kept, protected, or shared CDN), then the owner of every shipped
-range. Use it when a host name is added or an app moves servers. The output shows
-the DNS of the network it ran on: read it, never commit it.
+would do with it (kept, protected, or shared CDN), then which protected names each
+app owns and the owner of every shipped range. An app's own host names are judged
+without the protected names it owns, as the plugin judges them while that app is
+selected. Use it when a host name is added or an app moves servers. The output
+shows the DNS of the network it ran on: read it, never commit it.
+
+**Before each release, check Viber's and Kakao's sources.** Their networks are
+built from the network names and AS numbers in `tools/messaging-sources.json`,
+which do not update themselves. Check in ARIN's registry that Viber's networks are
+still registered as `AWS-VIBER-MEDIA` and `AWS-VIBER`, with no new one under
+another name, and in RIPEstat that Kakao still announces from AS7625, AS18160,
+AS38099 and AS152199, with no new AS of its own. Kakao Games, Kakao Pay, KakaoBank
+and Kakao Pay Insurance are separate companies with their own networks and stay
+out. Then regenerate and read the diff: a range that grows a lot needs a look
+before it ships.
 
 **Before each release, check for a newer Microsoft WNS file.** The generator pins
 one dated file, `WNSPublicIPs_<date>.xml`, in `tools/messaging-sources.json`
@@ -613,7 +706,9 @@ old file down, the build fails loudly instead.
 the changelog in `pkg-descr`, update the test counts and the static-analysis
 paragraph above, and tag. The `<version>` in `ParentalControl.xml` is the schema
 version of the saved settings, not the release; it changes only when the model
-does.
+does. When saved settings must change with it, add a migration named after the new
+version, as `Migrations/M1_2_0.php` is for 1.2.0, and add it to the installer's
+file list: the installer runs core's migrations whenever the model changes.
 
 **Change the configd action file only in a release that needs it**, because the
 previous release's installer restarts configd when that file changes.

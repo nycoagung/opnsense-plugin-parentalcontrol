@@ -9,8 +9,9 @@ Blocked devices lose internet only - local services such as printers, media
 players and dashboards keep working.
 
 A device can also be denied messaging apps (WhatsApp, Telegram, Snapchat,
-Signal and LINE), always or outside its allowed hours, while the rest of its
-internet keeps working. Blocking messaging also cuts every push notification
+Signal, LINE, Viber, KakaoTalk, and the whole Facebook, Instagram and Messenger
+apps), always or outside its allowed hours, while the rest of its internet
+keeps working. Blocking messaging also cuts every push notification
 on the device, including iMessage and incoming FaceTime calls, for as long as
 it lasts.
 
@@ -18,6 +19,21 @@ WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 
 Plugin Changelog
 ----------------
+
+0.2.0
+
+* Messaging blocking offers Viber, KakaoTalk, and Facebook & Instagram, which
+  blocks the whole Facebook, Instagram and Messenger apps. KakaoTalk also
+  blocks other Kakao services such as Daum and Kakao Map
+* All eight apps are selected by default. Upgrading adds the three new ones to
+  a saved selection, so a device denied messaging loses them too; a selection
+  saved empty stays empty
+* A protected name can belong to an app: Facebook's and Instagram's main names,
+  and three of WhatsApp's, are protected only while their app is not selected
+* The apps' names are looked up in turns, so a long list cannot starve a short
+  one
+* Viber's and KakaoTalk's networks ship with the plugin, built from ARIN's
+  registry and from the prefixes Kakao announces
 
 0.1.0
 
