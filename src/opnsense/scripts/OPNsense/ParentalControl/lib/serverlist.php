@@ -26,6 +26,27 @@ function messagingData(string $path): ?array
 }
 
 /**
+ * gaming.json, or null when it is missing or not readable as schema 1 with the
+ * lists the gaming objects are built from.
+ *
+ * @return ?array<string, mixed>
+ */
+function gamingData(string $path): ?array
+{
+    $raw = @file_get_contents($path);
+    $data = $raw === false ? null : json_decode($raw, true);
+    if (!is_array($data) || ($data['schema'] ?? null) !== 1) {
+        return null;
+    }
+    foreach (['safe_udp_ports', 'tcp_ports', 'servers', 'never_blocked', 'alias_suffixes'] as $key) {
+        if (!is_array($data[$key] ?? null)) {
+            return null;
+        }
+    }
+    return $data;
+}
+
+/**
  * The server list's cache: the learned addresses, the last good downloads, and
  * the last refresh's time and errors. A missing or damaged file reads as empty,
  * entry by entry (sanitizeCache()).
