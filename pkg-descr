@@ -1,17 +1,120 @@
 Turn a device's internet access on or off, on a schedule or on demand.
 
 Adds a settings page under Firewall and a dashboard widget with per-device
-toggles. Enforcement is a single firewall rule against a single externally
-managed alias, so switching a device takes effect immediately without a
-ruleset reload.
+toggles. Enforcement is one firewall rule against one externally managed alias
+for the internet, two rules and two such aliases for messaging, and three rules
+and three such aliases for gaming, so switching a device takes effect immediately
+without a ruleset reload.
 
 Blocked devices lose internet only - local services such as printers, media
 players and dashboards keep working.
+
+A device can also be denied messaging apps (WhatsApp, Telegram, Snapchat,
+Signal, LINE, Viber, KakaoTalk, and the whole Facebook, Instagram and Messenger
+apps), always or outside its allowed hours, while the rest of its internet
+keeps working. Blocking messaging also cuts every push notification
+on the device, including iMessage and incoming FaceTime calls, for as long as
+it lasts.
+
+A device can likewise be denied live online games, always or outside its
+allowed hours. The block goes by the kind of traffic games send: UDP to the
+internet is cut except on the few ports calls, Wi-Fi Calling, the web and the
+clock need, games' own TCP ports are cut, and a few games are blocked by their
+servers' addresses. Calls, Wi-Fi Calling, the web, video and app downloads keep
+working.
 
 WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 
 Plugin Changelog
 ----------------
+
+0.3.0
+
+* A Gaming setting on every device: Not blocked, Blocked, or Blocked outside
+  allowed hours, decided exactly as Messaging is
+* A device denied gaming cannot send UDP to the internet except on a short
+  safe-list (name lookups, time, the web over QUIC, Wi-Fi Calling, call relays,
+  FaceTime, Zoom, Meet, Signal), cannot use games' TCP ports, and cannot reach
+  the servers of Pokemon GO, Monster Hunter Now, Honkai Impact 3rd, Infinity
+  Nikki, Love and Deepspace, Last War: Survival, MONOPOLY GO!, Gossip Harbor and
+  the Heart of Vegas, Lightning Link and Cashman casino games, Niantic's sign-in,
+  which every Niantic game uses, or Vivox's in-game voice chat. Whiteout
+  Survival and Kingshot are blocked by their TCP ports
+* UDP to the local network, the firewall itself, Discord's own network and the
+  messaging apps' own networks is never treated as gaming, so calls, a VPN back
+  home and Discord voice keep working
+* A game host's address is learned only when it is the name's own and public; an
+  answer through a CDN is left alone, except Last War's Cloudflare game gateway,
+  which has an address of its own
+* No device is blocked from gaming until the never-blocked table holds the whole
+  local network, nor while a gaming alias is renamed by hand or missing
+* The Status tab and the status JSON show gaming per device and in a summary line
+* Table loads check every entry first and report a failed pfctl call, and only a
+  small change falls back to configd address by address
+* Every range is checked before it reaches a servers table, the shipped ones and
+  a download kept from an earlier version included
+* The messaging data build stops behind a filtering or failing resolver and on a
+  per-site list that shrank
+* tools/check-gaming-hosts.py checks the game hosts before a release
+
+0.2.0
+
+* Messaging blocking offers Viber, KakaoTalk, and Facebook & Instagram, which
+  blocks the whole Facebook, Instagram and Messenger apps. KakaoTalk also
+  blocks other Kakao services such as Daum and Kakao Map
+* All eight apps are selected by default. Upgrading adds the three new ones to
+  a saved selection, so a device denied messaging loses them too; a selection
+  saved empty stays empty
+* A protected name can belong to an app: Facebook's and Instagram's main names,
+  and three of WhatsApp's, are protected only while their app is not selected
+* The apps' names are looked up in turns, so a long list cannot starve a short
+  one
+* Viber's and KakaoTalk's networks ship with the plugin, built from ARIN's
+  registry and from the prefixes Kakao announces
+* The Settings tab has no Save button any more: Apply saves the settings when
+  they changed, then applies them, and an invalid setting stops it
+* A downloaded range that reaches into private, local, carrier-grade NAT or
+  multicast address space is ignored, and the data generator refuses an app
+  range that reaches into any special-purpose block
+* WhatsApp's fallback chat name is blocked too: once its main chat server is
+  blocked, WhatsApp moves to it within a minute or two
+* Signal's current apps send messages through grpc.chat.signal.org, which is
+  now on its list; Snapchat's chat gateway, duplex connection and API variants
+  and LINE's backup, regional and media gateways are added too
+* Telegram's apps have an address built in from a block Telegram leaves out of
+  its published list: that block, 95.161.64.0/20, ships with the plugin and is
+  blocked with the downloaded list
+* LINE is blocked by its own network (AS38631), like KakaoTalk, which also
+  blocks LINE's other services on blocked devices
+* Facebook & Instagram lists every gateway, live-message and encrypted-chat
+  server family Meta's apps use, with their fallbacks, and Facebook Lite;
+  WhatsApp's media fallback is listed too
+* WhatsApp and Facebook & Instagram are blocked at every Meta site: the
+  addresses of their servers at all of Meta's sites ship with the plugin, so an
+  app that Meta's DNS sends to a far-away site is still blocked
+* Changes to the servers table are loaded with one pfctl call each, so
+  thousands of entries apply at once
+
+0.1.0
+
+* Messaging blocking: each device has a Messaging setting (not blocked,
+  blocked, or blocked outside its allowed hours) and Settings has a list of
+  messaging apps to block. While a device is denied messaging all its
+  notifications are cut too, including iMessage and incoming FaceTime calls
+* Messaging adds two aliases (NoMessaging and Messaging_Servers) and two
+  floating block rules, made the first time a device uses it. The internet
+  alias can no longer be named NoMessaging or Messaging_Servers
+* The Status tab shows messaging per device, with a summary line, and the
+  status output gains the messaging fields
+* A device address with host bits set (192.0.2.10/24) is used in its network
+  form and one entered as /32 as the bare address, which is how pf keeps them
+* Uninstall also removes the messaging aliases, rules and pf tables and the
+  plugin's data directory, waits for a running sync, and refuses, changing
+  nothing, while anything else in the configuration refers to one of the
+  plugin's aliases
+* An installed installer now runs the downloaded release's own installer, so a
+  release that adds files installs completely. Upgrading from 0.0.2 needs the
+  install run twice (see the README)
 
 0.0.2
 

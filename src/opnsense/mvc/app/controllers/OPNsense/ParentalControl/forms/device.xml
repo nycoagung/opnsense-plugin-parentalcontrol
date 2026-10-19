@@ -24,10 +24,22 @@
         <help>Always allowed, always blocked, or allowed only during the hours below.</help>
     </field>
     <field>
+        <id>device.messaging</id>
+        <label>Messaging</label>
+        <type>dropdown</type>
+        <help>Block the messaging apps chosen under Settings. While messaging is blocked this device also receives no notifications from any app, including iMessage and incoming FaceTime calls, until the block lifts. 'Blocked outside allowed hours' follows the Days and Internet allowed fields below, even when Override is set to Force allow.</help>
+    </field>
+    <field>
+        <id>device.gaming</id>
+        <label>Gaming</label>
+        <type>dropdown</type>
+        <help>Blocks live online games. Calls, Wi-Fi Calling, web, video and app downloads keep working. Browser games, consoles and mobile data are not covered. 'Blocked outside allowed hours' follows the Days and Internet allowed fields below, even when Override is set to Force allow.</help>
+    </field>
+    <field>
         <id>device.weekdays</id>
         <label>Days</label>
         <type>select_multiple</type>
-        <help>Days the schedule applies to. On other days the device is blocked.</help>
+        <help>Days the schedule applies to. On other days the device is blocked. Messaging and Gaming set to 'Blocked outside allowed hours' follow these days and the times below.</help>
         <style>tokenize</style>
     </field>
     <field>

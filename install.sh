@@ -19,6 +19,8 @@
 #
 # If this script is run from an already-extracted archive it installs from there
 # rather than downloading again, so the bootstrap above costs exactly one fetch.
+# Run from anywhere else (the installed copy, which configctl runs), it downloads
+# the archive and hands over to the install.sh inside it.
 set -e
 
 GH_OWNER="${GH_OWNER:-nycoagung}"
@@ -36,17 +38,27 @@ P=src/opnsense
 
 [ -d "$MVC" ] || { echo "not an OPNsense system: $MVC missing" >&2; exit 1; }
 
+# The lib files, and messaging.json and gaming.json, which sync.php reads, are listed
+# before the scripts that need them: files are moved into place in list order.
 FILES="
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalControl.xml
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
 $P/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$M/Menu/Menu.xml
 $P/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$M/ACL/ACL.xml
+$P/mvc/app/models/OPNsense/ParentalControl/Migrations/M1_2_0.php|$M/Migrations/M1_2_0.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$C/IndexController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$C/Api/SettingsController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$C/Api/ServiceController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$C/forms/device.xml
 $P/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/general.xml
 $P/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
+$P/scripts/OPNsense/ParentalControl/lib/markers.php|$SCRIPTS/lib/markers.php
+$P/scripts/OPNsense/ParentalControl/lib/messaging.php|$SCRIPTS/lib/messaging.php
+$P/scripts/OPNsense/ParentalControl/lib/gaming.php|$SCRIPTS/lib/gaming.php
+$P/scripts/OPNsense/ParentalControl/lib/firewall.php|$SCRIPTS/lib/firewall.php
+$P/scripts/OPNsense/ParentalControl/lib/serverlist.php|$SCRIPTS/lib/serverlist.php
+$P/scripts/OPNsense/ParentalControl/messaging.json|$SCRIPTS/messaging.json
+$P/scripts/OPNsense/ParentalControl/gaming.json|$SCRIPTS/gaming.json
 $P/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
 $P/scripts/OPNsense/ParentalControl/uninstall.php|$SCRIPTS/uninstall.php
 $P/scripts/OPNsense/ParentalControl/uninstall.sh|$SCRIPTS/uninstall.sh
@@ -62,9 +74,15 @@ MODEL_BEFORE=$(hash_of "$M/ParentalControl.xml")
 
 HERE=$(dirname "$0")
 CLEAN=""
+# a download is removed however this ends - except by the exec below, which hands it on
+trap '[ -z "$CLEAN" ] || rm -rf "$CLEAN"' EXIT
 if [ -d "$HERE/$P" ]; then
     SRC="$HERE"
     echo "installing from $SRC"
+    # handed over by an installed copy (below): the download is this tree's parent
+    if [ "$(dirname "$HERE")" = "${PC_INSTALL_TMP:-}" ]; then
+        case "$PC_INSTALL_TMP" in /tmp/pcinst.*) CLEAN="$PC_INSTALL_TMP" ;; esac
+    fi
 else
     TMP=$(mktemp -d /tmp/pcinst.XXXXXX)
     CLEAN="$TMP"
@@ -73,7 +91,14 @@ else
         "https://codeload.github.com/${GH_OWNER}/${GH_REPO}/tar.gz/refs/heads/${GH_REF}"
     tar -xzf "$TMP/src.tgz" -C "$TMP"
     SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)
-    [ -n "$SRC" ] && [ -d "$SRC/$P" ] || { echo "archive did not contain $P" >&2; exit 1; }
+    [ -n "$SRC" ] && [ -d "$SRC/$P" ] && [ -f "$SRC/install.sh" ] ||
+        { echo "archive did not contain $P and install.sh" >&2; exit 1; }
+    # Hand over to the downloaded installer. This copy's FILES list is the one it
+    # was installed with, always the previous release's, so it would leave out
+    # any file a newer release adds. The new copy runs from the unpacked tree, so
+    # it installs from there and never fetches; it removes the download when done.
+    export PC_INSTALL_TMP="$TMP"
+    exec sh "$SRC/install.sh"
 fi
 
 # Check the whole set is present before touching anything on disk, so a
@@ -107,6 +132,9 @@ for entry in $FILES; do
 done
 [ -n "$CLEAN" ] && rm -rf "$CLEAN"
 echo "files installed"
+# an uninstall's marker (UNINSTALL_MARKER in lib/markers.php) stops every sync
+# until the plugin is installed again, which is now
+rm -f /var/db/parentalcontrol/uninstalling
 
 # This script is reachable as 'configctl parentalcontrol install'; restarting
 # configd from a script configd launched would kill it mid-run, so only restart

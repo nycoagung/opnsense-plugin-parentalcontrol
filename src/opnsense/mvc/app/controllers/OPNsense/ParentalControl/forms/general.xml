@@ -17,4 +17,11 @@
         <type>checkbox</type>
         <help>When a device becomes blocked, drop its established connections. Without this an in-progress stream keeps running until it ends by itself.</help>
     </field>
+    <field>
+        <id>parentalcontrol.general.messaging_apps</id>
+        <label>Messaging apps to block</label>
+        <type>select_multiple</type>
+        <help>Apps blocked on every device whose Messaging setting blocks it. Notifications are cut on those devices whichever apps are chosen, even none. Facebook &amp; Instagram blocks the whole Facebook, Instagram and Messenger apps, with Threads, Meta AI and &quot;Log in with Facebook&quot;; KakaoTalk also blocks other Kakao services such as Daum, Tistory, Melon and Kakao Map, and LINE blocks LINE's other services. Discord, Kik and WeChat are not offered because their servers are shared with other services.</help>
+        <style>tokenize</style>
+    </field>
 </form>

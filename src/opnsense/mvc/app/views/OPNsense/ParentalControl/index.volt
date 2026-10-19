@@ -101,20 +101,18 @@
             });
         });
 
+        /* the Settings tab as last loaded or saved; null until it has loaded */
+        var savedSettings = null;
         var data_get_map = {'frm_general': "/api/parentalcontrol/settings/get"};
         mapDataToFormUI(data_get_map).done(function () {
             formatTokenizersUI();
             $('.selectpicker').selectpicker('refresh');
-        });
-
-        $("#saveAct").click(function () {
-            saveFormToEndpoint("/api/parentalcontrol/settings/set", 'frm_general', function () {
-                /* applying is the Apply button's job - it owns the standard
-                   "changes have been applied" message and its placement */
-                $("#change_message_base_form").slideDown(1000, function () {
-                    setTimeout(function () { $("#change_message_base_form").slideUp(2000); }, 2000);
-                });
-            }, true);
+            savedSettings = JSON.stringify(getFormData('frm_general'));
+            /* the Apply bar's reminder, as the devices grid shows it after a save;
+               core's token field reports its changes as change events too */
+            $('#frm_general').on('change', function () {
+                $(document).trigger('settings-changed');
+            });
         });
 
         // Resolved state comes from the same script the cron run uses, so the
@@ -122,10 +120,13 @@
         var loadStatus = function () {
             ajaxGet("/api/parentalcontrol/service/status", {}, function (data) {
                 if (data === undefined || data.devices === undefined) { return; }
-                var rows = data.devices.map(function (d) {
-                    var badge = d.blocked
+                var esc = function (v) { return $('<div>').text(v).html(); };
+                var badgeOf = function (blocked) {
+                    return blocked
                         ? '<span class="label label-danger">{{ lang._("blocked") }}</span>'
                         : '<span class="label label-success">{{ lang._("allowed") }}</span>';
+                };
+                var rows = data.devices.map(function (d) {
                     // a MAC only means something once resolved, so show what it
                     // actually matched rather than just the configured value
                     var addr = $('<div>').text(d.address).html();
@@ -137,26 +138,74 @@
                     return '<tr><td>' + $('<div>').text(d.name).html() + '</td>' +
                            '<td>' + addr + '</td>' +
                            '<td>' + $('<div>').text(d.reason).html() + '</td>' +
-                           '<td>' + badge + '</td></tr>';
+                           '<td>' + badgeOf(d.blocked) + '</td>' +
+                           '<td>' + badgeOf(d.messaging_blocked) +
+                           ' <small class="text-muted">' + esc(d.messaging_reason) + '</small></td>' +
+                           '<td>' + badgeOf(d.gaming_blocked) +
+                           ' <small class="text-muted">' + esc(d.gaming_reason) + '</small></td></tr>';
                 }).join('');
                 $("#status-body").html(rows);
                 $("#status-alias").text(data.alias + ' (' + data.in_alias + ' ' + "{{ lang._('entries in pf') }}" + ')');
                 var cron = {'enabled': '', 'disabled': "{{ lang._('schedule cron is disabled') }}",
                             'absent': "{{ lang._('schedule cron not installed') }}"}[data.cron] || '';
-                var warn = cron ? [cron] : [];
+                // a disabled plugin disables its own job: no warning then
+                var warn = cron && data.enabled ? [cron] : [];
                 if (data.ipv6_active) {
                     warn.push("{{ lang._('IPv6 is active - blocked devices keep IPv6 internet access') }}");
                 }
                 $("#status-cron").html(warn.length
                     ? ' &middot; <span class="text-danger">' + warn.join(' &middot; ') + '</span>' : '');
+                // one summary for messaging and one for gaming, built the same way;
+                // refreshed_at is null both out of use and before the first
+                // refresh, so in_use decides which wording applies
+                var summary = function (c, entriesText, offText) {
+                    c = c || {};
+                    var errs = c.errors || [];
+                    var problems = errs.slice(0, 3).map(esc);
+                    if (errs.length > 3) {
+                        problems.push("{{ lang._('and %s more') }}".replace('%s', esc(errs.length - 3)));
+                    }
+                    if (c.error) {
+                        problems.unshift('<span class="text-danger">' + esc(c.error) + '</span>');
+                    }
+                    return ' &middot; ' + (c.in_use
+                        ? entriesText.replace('%s', esc(c.entries)) + ' &middot; ' +
+                          (c.refreshed_at
+                              ? "{{ lang._('refreshed %s') }}".replace('%s', esc(new Date(c.refreshed_at * 1000)
+                                  .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
+                              : "{{ lang._('not refreshed yet') }}")
+                        : offText) +
+                        (problems.length ? ' &middot; ' + problems.join(' &middot; ') : '');
+                };
+                $("#status-messaging").html(summary(data.messaging,
+                    "{{ lang._('Messaging: %s server entries') }}", "{{ lang._('Messaging: not in use') }}"));
+                $("#status-gaming").html(summary(data.gaming,
+                    "{{ lang._('Gaming: %s game-server entries') }}", "{{ lang._('Gaming: not in use') }}"));
             });
         };
         loadStatus();
         $("#refreshStatus").click(function () { loadStatus(); });
 
         /* base_apply_button only emits the markup; without this the button has
-           no label and does nothing */
+           no label and does nothing. Apply also saves the Settings tab, which has
+           no Save button: only when it changed, so an Apply after a device edit
+           adds no configuration revision. An invalid setting stops the Apply, and
+           core's validation handling brings up the tab (settings_tab). */
         $("#reconfigureAct").SimpleActionButton({
+            onPreAction: function () {
+                var dfObj = new $.Deferred();
+                var settings = JSON.stringify(getFormData('frm_general'));
+                if (savedSettings === null || settings === savedSettings) {
+                    return dfObj.resolve();
+                }
+                saveFormToEndpoint("/api/parentalcontrol/settings/set", 'frm_general', function () {
+                    savedSettings = settings;
+                    dfObj.resolve();
+                }, true, function () {
+                    dfObj.reject();
+                });
+                return dfObj;
+            },
             onAction: function () { loadStatus(); }
         });
     });
@@ -165,7 +214,7 @@
 <ul class="nav nav-tabs" role="tablist" id="maintabs">
     <li class="active"><a data-toggle="tab" href="#devices">{{ lang._('Devices') }}</a></li>
     <li><a data-toggle="tab" href="#status">{{ lang._('Status') }}</a></li>
-    <li><a data-toggle="tab" href="#settings">{{ lang._('Settings') }}</a></li>
+    <li><a data-toggle="tab" id="settings_tab" href="#settings">{{ lang._('Settings') }}</a></li>
 </ul>
 
 <div class="tab-content content-box">
@@ -183,6 +232,8 @@
                     <th data-column-id="allow_from" data-type="string" data-width="6em">{{ lang._('From') }}</th>
                     <th data-column-id="allow_to" data-type="string" data-width="6em">{{ lang._('Until') }}</th>
                     <th data-column-id="override" data-type="string">{{ lang._('Override') }}</th>
+                    <th data-column-id="messaging" data-type="string">{{ lang._('Messaging') }}</th>
+                    <th data-column-id="gaming" data-type="string">{{ lang._('Gaming') }}</th>
                     <th data-column-id="description" data-type="string" data-formatter="safe">{{ lang._('Description') }}</th>
                     <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
                 </tr>
@@ -191,7 +242,7 @@
             <tfoot>
                 <tr>
                     <td></td>
-                    <td colspan="10"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
+                    <td colspan="12"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
                 </tr>
             </tfoot>
         </table>
@@ -204,9 +255,11 @@
                     {# the summary row lives inside the table so it lines up with
                        the columns by construction, rather than by guessing padding #}
                     <tr>
-                        <th colspan="3" style="border-bottom: none;">
+                        <th colspan="5" style="border-bottom: none;">
                             {{ lang._('Alias') }}: <span id="status-alias">-</span>
                             <span id="status-cron" class="text-muted"></span>
+                            <span id="status-messaging"></span>
+                            <span id="status-gaming"></span>
                         </th>
                         <th style="border-bottom: none; text-align: right;">
                             <button id="refreshStatus" type="button" class="btn btn-xs btn-default">
@@ -219,6 +272,8 @@
                         <th>{{ lang._('Address') }}</th>
                         <th>{{ lang._('Reason') }}</th>
                         <th>{{ lang._('State') }}</th>
+                        <th>{{ lang._('Messaging') }}</th>
+                        <th>{{ lang._('Gaming') }}</th>
                     </tr>
                 </thead>
                 <tbody id="status-body"></tbody>
@@ -228,13 +283,6 @@
 
     <div id="settings" class="tab-pane fade in">
         {{ partial("layout_partials/base_form", ['fields': generalForm, 'id': 'frm_general']) }}
-        <div class="col-md-12">
-            <hr/>
-            <button class="btn btn-primary" id="saveAct" type="button">
-                <b>{{ lang._('Save') }}</b>
-                <i id="saveAct_progress" class=""></i>
-            </button>
-        </div>
     </div>
 </div>
 

@@ -11,17 +11,24 @@
  * dashboard widget and the cron run, so none of them can disagree about what
  * is actually enforced.
  *
- * Enforcement is a single externally-managed alias plus a single floating block
- * rule. Toggling a device is a pf table update, which takes effect immediately
- * and needs no ruleset reload. Per-device rules were rejected: they do not
- * scale, they apply slowly, and arbitrary per-device schedules would need one
- * rule per distinct schedule.
+ * The internet switch is a single externally-managed alias plus a single
+ * floating block rule. Toggling a device is a pf table update, which takes
+ * effect immediately and needs no ruleset reload. Per-device rules were
+ * rejected: they do not scale, they apply slowly, and arbitrary per-device
+ * schedules would need one rule per distinct schedule.
+ *
+ * Messaging is blocked the same way, with objects of its own made on first use:
+ * a table of the devices denied messaging, a table of the servers they may not
+ * reach, and two floating rules, one to those servers and one to the
+ * notification ports.
  */
 
 require_once("config.inc");
 require_once("util.inc");
 
 use OPNsense\Base\FieldTypes\BaseField;
+use OPNsense\Base\FieldTypes\NetworkAliasField;
+use OPNsense\Base\FieldTypes\PortField;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\Firewall\Alias;
@@ -33,15 +40,67 @@ use OPNsense\ParentalControl\ParentalControl;
    assumption about this particular network, so it stays correct anywhere. */
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
-/* The plugin finds its own alias and rule by these description prefixes rather
-   than by name. Names are user-editable, so matching on them means a rename
-   silently orphans the old objects - leaving whatever was blocked blocked
-   forever, with nothing in the UI explaining why. Prefixes are used so an
-   existing install whose rule description still embeds the old alias name is
-   still recognised. */
-const MARK_BLOCK = 'Parental Control: devices currently denied internet';
-const MARK_LOCAL = 'Parental Control: local networks';
-const MARK_RULE  = 'Parental Control: block internet';
+foreach (['markers.php', 'messaging.php', 'gaming.php', 'firewall.php', 'serverlist.php'] as $lib) {
+    /* an older installer's file list leaves out the files added since */
+    if (!is_file(__DIR__ . "/lib/$lib")) {
+        fwrite(STDERR, "plugin files incomplete (missing lib/$lib): run 'configctl parentalcontrol install' again\n");
+        exit(1);
+    }
+    require_once(__DIR__ . "/lib/$lib");
+}
+
+/* the messaging aliases' fixed names, each with the marker that makes it ours */
+const MSG_ALIASES = [MSG_DEVICES_ALIAS => MARK_MSG_DEVICES, MSG_SERVERS_ALIAS => MARK_MSG_SERVERS];
+
+/* the messaging rules' markers, each with [protocol, destination, destination port] */
+const MSG_RULES = [
+    MARK_MSG_RULE => ['any', MSG_SERVERS_ALIAS, ''],
+    MARK_NOTIFY_RULE => ['TCP', 'any', NOTIFY_PORTS],
+];
+
+/* the server list's data, shipped beside this script, and what the refresh keeps */
+const MSG_DATA_FILE = __DIR__ . '/messaging.json';
+const MSG_CACHE_FILE = DATA_DIR . '/messaging-cache.json';
+const MSG_DATA_MISSING = 'messaging data missing or unreadable';
+
+/* the gaming block's data, shipped beside this script, and what its refresh keeps */
+const GAME_DATA_FILE = __DIR__ . '/gaming.json';
+const GAME_CACHE_FILE = DATA_DIR . '/gaming-cache.json';
+const GAME_DATA_MISSING = 'gaming data missing or unreadable';
+
+$mode = isset($argv[1]) ? $argv[1] : 'sync';
+
+/* One sync at a time: DNS lookups make a run's length depend on the network,
+   and cron starts one every minute. Status only reads, so it never waits. */
+if ($mode !== 'status') {
+    if (!is_dir(DATA_DIR)) {
+        @mkdir(DATA_DIR, 0700);         /* a run starting at the same moment may make it first */
+    }
+    $lock = @fopen(DATA_DIR . '/sync.lock', 'c');
+    if ($lock === false) {
+        fwrite(STDERR, "cannot open " . DATA_DIR . "/sync.lock\n");
+        exit(1);
+    }
+    for ($waited = 0; !flock($lock, LOCK_EX | LOCK_NB); $waited++) {
+        if ($waited >= 30) {
+            fwrite(STDERR, "another sync is still running\n");
+            exit(1);
+        }
+        sleep(1);
+    }
+    /* config.inc read config.xml when it was required, before the lock was
+       held. Read it again, so this run builds its models from what the run
+       before it saved, and from any change made in the GUI meanwhile, instead
+       of saving an older copy over them. */
+    Config::getInstance()->forceReload();
+    /* Uninstall has removed everything, or is about to: put nothing back. Its
+       marker stops a sync that waited for uninstall.php. uninstall.sh deletes this
+       script before the marker, so a sync that waited longer finds it gone. */
+    if (file_exists(UNINSTALL_MARKER) || !is_file(__FILE__)) {
+        fwrite(STDERR, "uninstall in progress - nothing changed\n");
+        exit(0);
+    }
+}
 
 /* PHP does not read /etc/localtime; without date.timezone it silently uses UTC,
    which would shift every window by the UTC offset while the UI agreed with
@@ -52,7 +111,6 @@ if ($tz !== '' && @timezone_open($tz) !== false) {
     date_default_timezone_set($tz);
 }
 
-$mode = isset($argv[1]) ? $argv[1] : 'sync';
 $mdl = new ParentalControl();
 $backend = new Backend();
 
@@ -66,13 +124,16 @@ if ($aliasName === '') {
 }
 $localAlias = $aliasName . '_Local';
 $enabled = $mdl->general->enabled->isEqual('1');
+/* the apps whose servers are blocked, one list for every device */
+$msgApps = array_values(array_filter(explode(',', $mdl->general->messaging_apps->getValue())));
 
 /**
  * Resolve one device to blocked/allowed plus a human reason.
  *
+ * @param array{bool, string} $schedule deviceSchedule() for this device
  * @return array{bool, string} [blocked, reason]
  */
-function resolveDevice(BaseField $dev, bool $enabled): array
+function resolveDevice(BaseField $dev, bool $enabled, array $schedule): array
 {
     if (!$enabled) {
         return [false, 'plugin disabled'];
@@ -93,7 +154,19 @@ function resolveDevice(BaseField $dev, bool $enabled): array
         return [true, 'always blocked'];
     }
 
-    /* scheduled - decided by a pure function so it can be tested directly */
+    return $schedule;
+}
+
+/**
+ * The device's schedule, evaluated now. Called once per device per run, and
+ * that one result is handed to both the internet and the messaging decision,
+ * so the two cannot disagree, even when a run straddles a minute boundary.
+ *
+ * @return array{bool, string} [blocked, reason]
+ */
+function deviceSchedule(BaseField $dev): array
+{
+    /* decided by a pure function so it can be tested directly */
     return scheduleDecision(
         array_filter(explode(',', $dev->weekdays->getValue())),
         (int)date('H') * 60 + (int)date('i'),
@@ -209,25 +282,16 @@ function ensureCronJob(Backend $backend, bool $enabled): void
         $job->who = 'root';
         $job->command = 'parentalcontrol sync';
         $job->parameters = '';
-        $job->description = 'Parental Control: evaluate device schedules';
+        $job->description = CRON_DESCRIPTION;
         $changed = true;
     } elseif (!$found->enabled->isEqual($want)) {
         $found->enabled = $want;
         $changed = true;
     }
 
-    if (!$changed) {
+    if (!$changed || !saveModel($cron, 'cron')) {
         return;
     }
-    $val = $cron->performValidation();
-    if ($val->count() > 0) {
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "cron: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
-        return;
-    }
-    $cron->serializeToConfig();
-    Config::getInstance()->save();
     /* 'cron restart' is what regenerates the crontab - core's own cron
        ServiceController calls exactly this. 'cron reconfigure' is not a
        registered action: it returns quietly and the crontab is never written,
@@ -321,22 +385,50 @@ function timeToMinutes(string $v): ?int
 
 $devices = [];
 $blockSet = [];
+$msgBlockSet = [];
+$msgInUse = false;          /* the messaging objects are made on first use */
+$gameBlockSet = [];
+$gameInUse = false;         /* and so are the gaming objects */
 foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
-    list($blocked, $reason) = resolveDevice($dev, $enabled);
+    $schedule = deviceSchedule($dev);
+    list($blocked, $reason) = resolveDevice($dev, $enabled, $schedule);
+    [$mBlocked, $mReason] = messagingDecision(
+        $enabled,
+        $dev->enabled->isEqual('1'),
+        $dev->messaging->getValue(),
+        $schedule
+    );
+    $msgInUse = $msgInUse
+        || ($enabled && $dev->enabled->isEqual('1') && !$dev->messaging->isEqual('off'));
+    [$gBlocked, $gReason] = gamingDecision(
+        $enabled,
+        $dev->enabled->isEqual('1'),
+        $dev->gaming->getValue(),
+        $schedule
+    );
+    $gameInUse = $gameInUse
+        || ($enabled && $dev->enabled->isEqual('1') && !$dev->gaming->isEqual('off'));
     $addr = trim($dev->address->getValue());
 
     /* a MAC is an identity, not something pf can match - resolve it to whatever
        address the device is using right now */
     if (isMac($addr)) {
         $targets = macToAddresses($addr);
-        $resolved = empty($targets) ? '' : implode(', ', $targets);
         if (empty($targets) && $blocked) {
             $reason .= ' (MAC not currently resolvable)';
         }
+        if (empty($targets) && $mBlocked) {
+            $mReason .= ' (MAC not currently resolvable)';
+        }
+        if (empty($targets) && $gBlocked) {
+            $gReason .= ' (MAC not currently resolvable)';
+        }
     } else {
         $targets = $addr === '' ? [] : [$addr];
-        $resolved = $addr;
     }
+    /* in the form pf keeps, so the table diffs settle and core's state filter takes it */
+    $targets = array_map('canonicalTarget', $targets);
+    $resolved = implode(', ', $targets);
 
     $devices[] = [
         'uuid' => $uuid,
@@ -349,10 +441,26 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
         'enabled' => $dev->enabled->isEqual('1'),
         'blocked' => $blocked,
         'reason' => $reason,
+        'messaging' => $dev->messaging->getValue(),
+        'messaging_blocked' => $mBlocked,
+        'messaging_reason' => $mReason,
+        'gaming' => $dev->gaming->getValue(),
+        'gaming_blocked' => $gBlocked,
+        'gaming_reason' => $gReason,
     ];
     if ($blocked) {
         foreach ($targets as $t) {
             $blockSet[$t] = true;
+        }
+    }
+    if ($mBlocked) {
+        foreach ($targets as $t) {
+            $msgBlockSet[$t] = true;
+        }
+    }
+    if ($gBlocked) {
+        foreach ($targets as $t) {
+            $gameBlockSet[$t] = true;
         }
     }
 }
@@ -360,39 +468,130 @@ foreach ($mdl->devices->iterateItems() as $uuid => $dev) {
 /* ---- status: report only ------------------------------------------------- */
 
 /**
- * Current contents of the pf table.
+ * Why the messaging objects cannot be used, or null when they can. Their names
+ * are fixed, and an alias with one of them that this plugin did not make is
+ * never taken over.
  *
- * 'filter list table' answers {"items": [...]} - the payload is under 'items',
- * not at the top level, which is how core's own alias utility reads it. Getting
- * that wrong returns an empty list silently, which makes every address look
- * absent: nothing is ever removed from the table, so a device stays blocked
- * after its schedule reopens.
- *
- * @return list<string>
+ * @param list<array{name: string, description: string}> $aliases every alias
  */
-function tableContents(Backend $backend, string $alias): array
+function messagingConflict(array $aliases): ?string
 {
-    $raw = $backend->configdpRun('filter list table', [$alias]);
-    $decoded = json_decode(trim((string)$raw), true);
-    if (!is_array($decoded)) {
-        return [];
-    }
-    $items = array_key_exists('items', $decoded) ? $decoded['items'] : $decoded;
-    $out = [];
-    foreach ((array)$items as $row) {
-        if (is_array($row)) {
-            if (isset($row['ip']) && is_string($row['ip'])) {
-                $out[] = $row['ip'];
-            }
-        } elseif (is_string($row) && $row !== '') {
-            $out[] = $row;
+    $names = aliasConflicts($aliases, MSG_ALIASES);
+    return $names === [] ? null : implode('; ', array_map(
+        fn(string $name): string => "alias name $name is used by an alias this plugin does not own",
+        $names
+    ));
+}
+
+/**
+ * Why the gaming objects cannot be used, or null when they can: as for messaging,
+ * an alias holding one of their fixed names that this plugin did not make.
+ *
+ * @param list<array{name: string, description: string}> $aliases every alias
+ */
+function gamingConflict(array $aliases): ?string
+{
+    $names = aliasConflicts($aliases, GAME_ALIASES);
+    return $names === [] ? null : implode('; ', array_map(
+        fn(string $name): string => "alias name $name is used by an alias this plugin does not own",
+        $names
+    ));
+}
+
+/**
+ * What is wrong with the messaging objects, or null when nothing is: first the
+ * ones missing, then the aliases renamed in the GUI. Core repoints the rules to
+ * a renamed alias, while the plugin fills only the table of the fixed name, and
+ * that only while its alias has that name. Only reads.
+ *
+ * @param list<array{name: string, description: string}> $aliases every alias
+ * @param list<array{name: string, description: string}> $rules   every rule
+ */
+function messagingObjectsProblem(array $aliases, array $rules): ?string
+{
+    $missing = [];
+    $renamed = [];
+    foreach (MSG_ALIASES as $name => $marker) {
+        $alias = findByMarker($aliases, $marker);
+        if ($alias === null) {
+            $missing[] = $marker;
+        } elseif ($alias['name'] !== $name) {
+            $renamed[] = "messaging alias renamed: {$alias['name']} should be $name";
         }
     }
-    return $out;
+    foreach (array_keys(MSG_RULES) as $marker) {
+        if (findByMarker($rules, $marker) === null) {
+            $missing[] = $marker;
+        }
+    }
+
+    $problems = [];
+    if ($missing !== []) {
+        $problems[] = 'messaging objects missing: ' . implode(', ', $missing);
+    }
+    if ($renamed !== []) {
+        $problems[] = implode(', ', $renamed);
+    }
+    return $problems === [] ? null : implode('; ', $problems);
+}
+
+/**
+ * What is wrong with the gaming objects, or null when nothing is, read the same way
+ * as messagingObjectsProblem(): the ones missing, then the aliases renamed in the GUI.
+ *
+ * @param list<array{name: string, description: string}> $aliases every alias
+ * @param list<array{name: string, description: string}> $rules   every rule
+ */
+function gamingObjectsProblem(array $aliases, array $rules): ?string
+{
+    $missing = [];
+    $renamed = [];
+    foreach (GAME_ALIASES as $name => $marker) {
+        $alias = findByMarker($aliases, $marker);
+        if ($alias === null) {
+            $missing[] = $marker;
+        } elseif ($alias['name'] !== $name) {
+            $renamed[] = "gaming alias renamed: {$alias['name']} should be $name";
+        }
+    }
+    foreach (array_keys(GAME_RULES) as $marker) {
+        if (findByMarker($rules, $marker) === null) {
+            $missing[] = $marker;
+        }
+    }
+
+    $problems = [];
+    if ($missing !== []) {
+        $problems[] = 'gaming objects missing: ' . implode(', ', $missing);
+    }
+    if ($renamed !== []) {
+        $problems[] = implode(', ', $renamed);
+    }
+    return $problems === [] ? null : implode('; ', $problems);
 }
 
 if ($mode === 'status') {
     $current = tableContents($backend, $aliasName);
+    $aliases = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
+    $msgConflict = messagingConflict($aliases);
+    /* While in use the objects must exist under their fixed names, and the data
+       must be readable, or a device shown as denied messaging has nothing
+       enforcing it. Out of use their absence is normal. A conflict says more,
+       so it wins. */
+    $msgError = $msgConflict;
+    if ($msgError === null && $msgInUse) {
+        $msgError = messagingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
+            ?? (messagingData(MSG_DATA_FILE) === null ? MSG_DATA_MISSING : null);
+    }
+    $cache = readCache(MSG_CACHE_FILE);
+    /* gaming, read the same way */
+    $gameConflict = gamingConflict($aliases);
+    $gameError = $gameConflict;
+    if ($gameError === null && $gameInUse) {
+        $gameError = gamingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
+            ?? (gamingData(GAME_DATA_FILE) === null ? GAME_DATA_MISSING : null);
+    }
+    $gameCache = readCache(GAME_CACHE_FILE);
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -401,6 +600,34 @@ if ($mode === 'status') {
         'in_alias' => count($current),
         'alias_entries' => $current,
         'devices' => $devices,
+        'messaging' => [
+            'error' => $msgError,
+            'devices_table' => MSG_DEVICES_ALIAS,
+            'servers_table' => MSG_SERVERS_ALIAS,
+            /* under a conflict that table belongs to someone else's alias */
+            'entries' => $msgConflict === null ? count(tableContents($backend, MSG_SERVERS_ALIAS)) : 0,
+            'learned' => count($cache['learned']),
+            /* nothing is refreshed while out of use, so the last refresh's time
+               and errors would describe an older use */
+            'refreshed_at' => $msgInUse ? $cache['refreshed_at'] : null,
+            'apps' => $msgApps,
+            'errors' => $msgInUse ? $cache['errors'] : [],
+            /* refreshed_at is null both out of use and before the first refresh */
+            'in_use' => $msgInUse,
+        ],
+        'gaming' => [
+            'error' => $gameError,
+            'devices_table' => GAME_DEVICES_ALIAS,
+            'servers_table' => GAME_SERVERS_ALIAS,
+            'exempt_table' => GAME_EXEMPT_ALIAS,
+            /* under a conflict those tables belong to someone else's aliases */
+            'entries' => $gameConflict === null ? count(tableContents($backend, GAME_SERVERS_ALIAS)) : 0,
+            'exempt_entries' => $gameConflict === null ? count(tableContents($backend, GAME_EXEMPT_ALIAS)) : 0,
+            'learned' => count($gameCache['learned']),
+            'refreshed_at' => $gameInUse ? $gameCache['refreshed_at'] : null,
+            'errors' => $gameInUse ? $gameCache['errors'] : [],
+            'in_use' => $gameInUse,
+        ],
     ]);
     exit(0);
 }
@@ -427,7 +654,7 @@ foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
 }
 
 /* A renamed external alias means a renamed pf table, so the old one keeps its
-   entries and nothing references it any more. Remember it and flush it below,
+   entries and nothing references it any more. Remember it and remove it below,
    or every address blocked at the moment of the rename stays blocked. */
 $staleTable = null;
 
@@ -456,19 +683,8 @@ if ($localNode === null) {
     $localNode->name = $localAlias;
     $cfgChanged = true;
 }
-if ($cfgChanged) {
-    $val = $aliasMdl->performValidation();
-    if ($val->count() == 0) {
-        $aliasMdl->serializeToConfig();
-        Config::getInstance()->save();
-    } else {
-        /* print what actually failed - a bare "validation failed" makes a first
-           install impossible to diagnose without a shell */
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "alias: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
-        exit(1);
-    }
+if ($cfgChanged && !saveModel($aliasMdl, 'alias')) {
+    exit(1);
 }
 
 /* one floating block rule: source in the alias, destination NOT local.
@@ -513,50 +729,261 @@ if ($ruleNode === null || $ruleChanged) {
         $rule->destination_not = '1';
         $rule->description = $ruleDescr;
     }
-    $val = $filterMdl->performValidation();
-    if ($val->count() == 0) {
-        $filterMdl->serializeToConfig();
-        Config::getInstance()->save();
-        $cfgChanged = true;
-    } else {
-        foreach ($val->getMessages() as $msg) {
-            fwrite(STDERR, "rule: " . $msg->getField() . ": " . $msg->getMessage() . "\n");
-        }
+    if (!saveModel($filterMdl, 'rule')) {
         exit(1);
     }
+    $cfgChanged = true;
 }
+
+/* ---- make sure the messaging aliases and rules exist --------------------- */
+
+/**
+ * Create whichever messaging aliases and rules are missing, found by marker.
+ *
+ * Called while some device uses messaging, so the objects appear on first use;
+ * only uninstall removes them. When an alias that is not the plugin's holds one
+ * of the fixed names, nothing is created or changed. Errors are returned, never
+ * exited on: a messaging problem must not stop the internet block.
+ *
+ * @param bool $cfgChanged set when anything was saved, so that the caller's
+ *                         single filter reload covers it
+ * @return ?string null on success, else why messaging cannot be enforced
+ */
+function ensureMessagingObjects(bool &$cfgChanged): ?string
+{
+    $aliasMdl = new Alias();
+    $aliases = modelRows($aliasMdl->aliases->alias);
+    $conflict = messagingConflict($aliases);
+    if ($conflict !== null) {
+        return $conflict;
+    }
+
+    $aliasAdded = false;
+    foreach (MSG_ALIASES as $name => $marker) {
+        if (findByMarker($aliases, $marker) === null) {
+            $node = $aliasMdl->aliases->alias->Add();
+            $node->name = $name;
+            $node->type = 'external';           /* contents managed here, not in config */
+            $node->enabled = '1';
+            $node->description = $marker;
+            $aliasAdded = true;
+        }
+    }
+    if ($aliasAdded) {
+        if (!saveModel($aliasMdl, 'alias')) {
+            return 'aliases failed validation';
+        }
+        $cfgChanged = true;
+        /* Core keeps the alias names a rule may use in a static list for the
+           whole process (BaseListField's option cache), and the internet rule's
+           Filter model above filled it before these two existed. Saving them
+           does not refresh it: drop it, or the rules below fail validation. */
+        (new NetworkAliasField())->resetStaticOptions();
+    }
+
+    $filterMdl = new Filter();
+    $rules = modelRows($filterMdl->rules->rule);
+    $ruleAdded = false;
+    foreach (MSG_RULES as $marker => [$protocol, $destination, $port]) {
+        if (findByMarker($rules, $marker) === null) {
+            $rule = $filterMdl->rules->rule->Add();
+            $rule->enabled = '1';
+            $rule->action = 'block';
+            $rule->quick = '1';
+            $rule->direction = 'in';
+            $rule->ipprotocol = 'inet';
+            $rule->protocol = $protocol;
+            $rule->source_net = MSG_DEVICES_ALIAS;
+            $rule->destination_net = $destination;
+            $rule->destination_port = $port;
+            $rule->description = $marker;
+            $ruleAdded = true;
+        }
+    }
+    if ($ruleAdded) {
+        if (!saveModel($filterMdl, 'rule')) {
+            return 'rules failed validation';
+        }
+        $cfgChanged = true;
+    }
+    return null;
+}
+
+/**
+ * Create whichever gaming aliases and rules are missing, found by marker, and keep
+ * the two port aliases' contents equal to the shipped data's.
+ *
+ * As for messaging: called while some device uses gaming, nothing is created or
+ * changed while an alias that is not the plugin's holds one of the fixed names, and
+ * errors are returned, never exited on. The port aliases hold every UDP port but the
+ * safe-list, and the game TCP ports; a plugin update that changes either list
+ * rewrites them here.
+ *
+ * @param bool                 $cfgChanged set when anything was saved, so that the
+ *                                         caller's single filter reload covers it
+ * @param array<string, mixed> $gaming     gaming.json
+ * @return ?string null on success, else why gaming cannot be enforced
+ */
+function ensureGamingObjects(bool &$cfgChanged, array $gaming): ?string
+{
+    $aliasMdl = new Alias();
+    $conflict = gamingConflict(modelRows($aliasMdl->aliases->alias));
+    if ($conflict !== null) {
+        return $conflict;
+    }
+
+    /** @var array<array{int, int}> $safe */
+    $safe = $gaming['safe_udp_ports'];
+    /** @var array<array{int, int}> $tcp */
+    $tcp = $gaming['tcp_ports'];
+    $ports = [
+        GAME_UDP_PORTS_ALIAS => portAliasContent(complementPorts($safe)),
+        GAME_TCP_PORTS_ALIAS => portAliasContent($tcp),
+    ];
+    $aliasSaved = false;
+    foreach (GAME_ALIASES as $name => $marker) {
+        $node = null;
+        foreach ($aliasMdl->aliases->alias->iterateItems() as $item) {
+            if (str_starts_with($item->description->getValue(), $marker)) {
+                $node = $item;
+                break;
+            }
+        }
+        if ($node === null) {
+            $node = $aliasMdl->aliases->alias->Add();
+            $node->name = $name;
+            $node->type = isset($ports[$name]) ? 'port' : 'external';  /* external: contents managed here */
+            $node->enabled = '1';
+            $node->description = $marker;
+            $aliasSaved = true;
+        }
+        if (isset($ports[$name]) && !$node->content->isEqual($ports[$name])) {
+            $node->content = $ports[$name];
+            $aliasSaved = true;
+        }
+    }
+    if ($aliasSaved) {
+        if (!saveModel($aliasMdl, 'alias')) {
+            return 'aliases failed validation';
+        }
+        $cfgChanged = true;
+        /* Core keeps the alias names a rule may use in static lists for the whole
+           process, filled when the internet rule's Filter model loaded, before these
+           existed: network aliases in BaseListField's option cache, port aliases in
+           PortField's own. Drop both, or the rules below fail validation. PortField
+           offers no reset, so its list is cleared directly; if a later core renames
+           it, the rules are simply made on the next run, once the aliases exist. */
+        (new NetworkAliasField())->resetStaticOptions();
+        if (property_exists(PortField::class, 'internalCacheOptionList')) {
+            (new \ReflectionProperty(PortField::class, 'internalCacheOptionList'))->setValue(null, []);
+        }
+    }
+
+    $filterMdl = new Filter();
+    $rules = modelRows($filterMdl->rules->rule);
+    $ruleAdded = false;
+    foreach (GAME_RULES as $marker => [$protocol, $destination, $inverted, $port]) {
+        if (findByMarker($rules, $marker) === null) {
+            $rule = $filterMdl->rules->rule->Add();
+            $rule->enabled = '1';
+            $rule->action = 'block';
+            $rule->quick = '1';
+            $rule->direction = 'in';
+            $rule->ipprotocol = 'inet';
+            $rule->protocol = $protocol;
+            $rule->source_net = GAME_DEVICES_ALIAS;
+            $rule->destination_net = $destination;
+            $rule->destination_not = $inverted;
+            $rule->destination_port = $port;
+            $rule->description = $marker;
+            $ruleAdded = true;
+        }
+    }
+    if ($ruleAdded) {
+        if (!saveModel($filterMdl, 'rule')) {
+            return 'rules failed validation';
+        }
+        $cfgChanged = true;
+    }
+    return null;
+}
+
+/* The objects are fine unless an alias that is not ours holds one of their
+   names. That is checked every run, in use or not, because the device table is
+   synced every run (below); only creating the objects waits for first use. */
+$msgError = messagingConflict(modelRows($aliasMdl->aliases->alias));
+$msgObjectsOk = $msgError === null;
+if ($msgObjectsOk && $msgInUse) {
+    /* an exception too, say a failed config save, must not stop the internet
+       block below */
+    try {
+        $msgError = ensureMessagingObjects($cfgChanged);
+    } catch (\Throwable $e) {
+        $msgError = $e->getMessage();
+    }
+}
+if ($msgError !== null) {
+    fwrite(STDERR, "messaging: $msgError\n");
+}
+
+/* The same for gaming, which also needs its data to build the port aliases. */
+$gameData = null;
+$gameError = gamingConflict(modelRows($aliasMdl->aliases->alias));
+$gameObjectsOk = $gameError === null;
+if ($gameObjectsOk && $gameInUse) {
+    $gameData = gamingData(GAME_DATA_FILE);
+    if ($gameData === null) {
+        $gameError = GAME_DATA_MISSING;
+    } else {
+        /* a gaming problem must not stop the internet or messaging block below */
+        try {
+            $gameError = ensureGamingObjects($cfgChanged, $gameData);
+        } catch (\Throwable $e) {
+            $gameError = $e->getMessage();
+        }
+    }
+}
+if ($gameError !== null) {
+    fwrite(STDERR, "gaming: $gameError\n");
+}
+
+/* Entries go into a fixed-name table only while the plugin's own alias has that
+   name. After a rename by hand, or when the alias could not be made, `pfctl -T add`
+   would create the table itself, kept by pf, and uninstall, which finds the tables
+   by marker, would never remove it. Deletions still run. */
+$aliasRows = configRows('/opnsense/OPNsense/Firewall/Alias/aliases/alias');
+$addTo = [];
+foreach (array_merge(MSG_ALIASES, array_intersect_key(GAME_ALIASES, array_flip(GAME_TABLES))) as $name => $marker) {
+    $own = findByMarker($aliasRows, $marker);
+    $addTo[$name] = $own !== null && $own['name'] === $name;
+}
+
 if ($cfgChanged) {
     $backend->configdRun('filter reload');
 }
 
-/* The renamed-away table is no longer referenced by any rule, but its entries
-   survive in pf until something clears them. Flush it so a device blocked at
-   the moment of the rename is not left blocked by a table nobody maintains. */
+/* The renamed-away table is no longer referenced by any rule once the reload
+   above has run, but pf keeps it, entries and all, as it keeps every alias table.
+   Kill it, which empties and removes it, so a device blocked at the moment of the
+   rename is not left blocked by a table nobody maintains. */
 if ($staleTable !== null) {
-    $backend->configdpRun('filter delete table', [$staleTable, 'ALL']);
-    fwrite(STDERR, "alias renamed $staleTable -> $aliasName; flushed the old table\n");
+    $backend->configdpRun('filter kill table', [$staleTable]);
+    fwrite(STDERR, "alias renamed $staleTable -> $aliasName; removed the old table\n");
 }
 
 /* ---- sync the table ------------------------------------------------------ */
 
-$current = tableContents($backend, $aliasName);
 $want = array_keys($blockSet);
-
-$toAdd = array_diff($want, $current);
-$toDel = array_diff($current, $want);
-
-foreach ($toAdd as $addr) {
-    $backend->configdpRun('filter add table', [$aliasName, $addr]);
-}
-foreach ($toDel as $addr) {
-    $backend->configdpRun('filter delete table', [$aliasName, $addr]);
+$diff = syncTable($backend, $aliasName, $want);
+foreach ($diff['errors'] as $error) {
+    fwrite(STDERR, "$error\n");
 }
 
 /* Established connections survive a new block, so a stream already running
    keeps going until it ends by itself. Dropping their states is what makes
    "off" mean off. Best effort: never fail the sync over it. */
 if ($mdl->general->kill_states->isEqual('1')) {
-    foreach ($toAdd as $addr) {
+    foreach ($diff['added'] as $addr) {
         /* pfctl -k takes a host. For a CIDR, explode()[0] is the network
            address - killing states for an address nobody holds. Skip those and
            say so rather than appearing to have done something. */
@@ -568,4 +995,153 @@ if ($mdl->general->kill_states->isEqual('1')) {
     }
 }
 
-printf("blocked=%d added=%d removed=%d\n", count($want), count($toAdd), count($toDel));
+printf("blocked=%d added=%d removed=%d\n", count($want), count($diff['added']), count($diff['removed']));
+
+/* ---- refresh the messaging server list ----------------------------------- */
+
+/* After the internet switch, so a slow resolver never delays it, and before the
+   device table, so a device newly denied messaging meets this run's list. Only
+   while in use: until then the list has no effect, so nothing is looked up or
+   downloaded and the servers table is left as it is. */
+$dest = [];             /* this run's servers, for dropping connections below */
+$addedDest = [];        /* the servers this run added to their table */
+$cache = null;          /* the cache this run wrote; null when it did not refresh */
+if ($msgObjectsOk && $msgInUse) {
+    $data = messagingData(MSG_DATA_FILE);
+    if ($data === null) {
+        fwrite(STDERR, 'messaging: ' . MSG_DATA_MISSING . "\n");
+    } else {
+        $cache = readCache(MSG_CACHE_FILE);
+        /* an exception must not stop the device table below */
+        try {
+            [$dest, $addedDest, $cache] = refreshServerList(
+                $backend,
+                MSG_SERVERS_ALIAS,
+                $data,
+                $msgApps,
+                $cache,
+                $addTo[MSG_SERVERS_ALIAS]
+            );
+        } catch (\Throwable $e) {
+            $cache['errors'] = ['refresh failed: ' . $e->getMessage()];
+        }
+        foreach ($cache['errors'] as $error) {
+            fwrite(STDERR, "messaging: $error\n");
+        }
+        writeCache(MSG_CACHE_FILE, $cache);
+    }
+}
+
+/* ---- sync the messaging device table ------------------------------------- */
+
+/* Every run, in use or not: a device switched back to "Not blocked", or the
+   plugin disabled, must leave the table even when nobody else uses messaging.
+   Never under a conflict: that table belongs to someone else's alias. */
+if ($msgObjectsOk) {
+    $msgWant = array_keys($msgBlockSet);
+    $msgDiff = syncTable($backend, MSG_DEVICES_ALIAS, $msgWant, $addTo[MSG_DEVICES_ALIAS]);
+    printf(
+        "messaging blocked=%d added=%d removed=%d\n",
+        count($msgWant),
+        count($msgDiff['added']),
+        count($msgDiff['removed'])
+    );
+    foreach ($msgDiff['errors'] as $error) {
+        fwrite(STDERR, "messaging: $error\n");
+    }
+
+    /* As for the internet switch, a new block must also cut what is already open. */
+    $failures = $msgDiff['errors'];
+    if ($mdl->general->kill_states->isEqual('1')) {
+        $failures = array_merge($failures, dropMessagingStates($backend, $msgWant, $msgDiff['added'], $dest, $addedDest));
+    }
+    /* status shows the errors the cache holds */
+    if ($failures !== [] && $cache !== null) {
+        $cache['errors'] = array_merge($cache['errors'], $failures);
+        writeCache(MSG_CACHE_FILE, $cache);
+    }
+}
+
+/* ---- the gaming tables --------------------------------------------------- */
+
+/* The never-blocked table first: the UDP rule blocks everything outside it, so it
+   must hold the local set before any device is in the device table, or a device
+   denied gaming would lose its own network, DHCP and DNS. Only while in use, like
+   the messaging list. */
+$gameErrors = [];
+$gameExempt = [];           /* this run's never-blocked destinations, for the drops */
+$gameServers = [];          /* this run's game servers */
+$gameAddedServers = [];     /* the game servers this run added to their table */
+$gameCache = null;          /* the cache this run writes; null when it did not refresh */
+if ($gameObjectsOk && $gameInUse && $gameData !== null) {
+    $ifconfig = [];
+    @exec('/sbin/ifconfig -a 2>/dev/null', $ifconfig);
+    $callNets = messagingData(MSG_DATA_FILE);
+    if ($callNets === null) {
+        $gameErrors[] = 'messaging data missing; calls in messaging apps are not exempted';
+    }
+    $gameExempt = neverBlocked(firewallIpv4(implode("\n", $ifconfig)), $gameData, $callNets);
+    $exemptDiff = syncTable($backend, GAME_EXEMPT_ALIAS, $gameExempt, $addTo[GAME_EXEMPT_ALIAS]);
+    $gameErrors = array_merge($gameErrors, $exemptDiff['errors']);
+
+    /* then the game servers, before the device table, so a device newly denied
+       gaming meets this run's list */
+    $gameCache = readCache(GAME_CACHE_FILE);
+    try {
+        [$gameServers, $gameAddedServers, $gameCache] = refreshGamingServers(
+            $backend,
+            GAME_SERVERS_ALIAS,
+            $gameData,
+            array_values(array_filter((array)($callNets['shared_cdn_ranges'] ?? []), 'is_string')),
+            $gameCache,
+            $addTo[GAME_SERVERS_ALIAS]
+        );
+    } catch (\Throwable $e) {
+        $gameCache['errors'] = ['refresh failed: ' . $e->getMessage()];
+    }
+}
+
+/* The device table, every run, in use or not, as for messaging, and never under a
+   conflict. No device enters it while a gaming object is missing or renamed, or the
+   never-blocked table lacks any of the local set (gamingRefusal()): a renamed,
+   failed or not yet loaded never-blocked table must not cut a device off its LAN. */
+if ($gameObjectsOk) {
+    $gameWant = array_keys($gameBlockSet);
+    $refusal = $gameWant === [] ? null : gamingRefusal(
+        gamingObjectsProblem($aliasRows, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule')),
+        tableContents($backend, GAME_EXEMPT_ALIAS)
+    );
+    if ($refusal !== null) {
+        $gameErrors[] = $refusal;
+        $gameWant = [];
+    }
+    $gameDiff = syncTable($backend, GAME_DEVICES_ALIAS, $gameWant, $addTo[GAME_DEVICES_ALIAS]);
+    printf(
+        "gaming blocked=%d added=%d removed=%d\n",
+        count($gameWant),
+        count($gameDiff['added']),
+        count($gameDiff['removed'])
+    );
+    $gameErrors = array_merge($gameErrors, $gameDiff['errors']);
+
+    /* as for messaging, a new block also ends the games already being played */
+    if ($mdl->general->kill_states->isEqual('1') && $gameData !== null) {
+        /** @var array<array{int, int}> $safeUdp */
+        $safeUdp = $gameData['safe_udp_ports'];
+        /** @var array<array{int, int}> $tcpPorts */
+        $tcpPorts = $gameData['tcp_ports'];
+        $gameErrors = array_merge($gameErrors, dropGamingStates($backend, $gameWant, $gameDiff['added'],
+            $gameExempt, $safeUdp, $tcpPorts, $gameServers, $gameAddedServers));
+    }
+}
+foreach ($gameErrors as $error) {
+    fwrite(STDERR, "gaming: $error\n");
+}
+/* status shows the errors the cache holds */
+if ($gameCache !== null) {
+    foreach ($gameCache['errors'] as $error) {
+        fwrite(STDERR, "gaming: $error\n");
+    }
+    $gameCache['errors'] = array_merge($gameCache['errors'], $gameErrors);
+    writeCache(GAME_CACHE_FILE, $gameCache);
+}

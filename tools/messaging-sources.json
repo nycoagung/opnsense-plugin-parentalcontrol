@@ -1,0 +1,207 @@
+{
+  "apps": {
+    "line": {
+      "label": "LINE",
+      "hosts": ["legy.line-apps.com", "gd2.line.naver.jp", "line.me", "legy-backup.line-apps.com",
+                "gwz.line.naver.jp", "gwk.line.naver.jp", "legy-us-short.line.naver.jp", "obs.line-apps.com"],
+      "ranges_sources": [{"ripestat_asn": 38631}]
+    },
+    "signal": {
+      "label": "Signal",
+      "hosts": ["grpc.chat.signal.org", "chat.signal.org", "sfu.voip.signal.org"],
+      "ranges_url": null
+    },
+    "snapchat": {
+      "label": "Snapchat",
+      "hosts": ["app.snapchat.com", "aws.api.snapchat.com", "gcp.api.snapchat.com", "snapchat.com",
+                "chat-gateway-prod.chat.snapchat.com", "aws.duplex.snapchat.com", "usc1-gcp-v62.api.snapchat.com",
+                "use4-gcp-v4.api.snapchat.com", "use4-gcp-v6.api.snapchat.com"],
+      "ranges_url": null
+    },
+    "telegram": {
+      "label": "Telegram",
+      "hosts": ["telegram.org", "web.telegram.org", "t.me"],
+      "ranges_url": "https://core.telegram.org/resources/cidr.txt",
+      "extra_ranges": ["95.161.64.0/20"]
+    },
+    "whatsapp": {
+      "label": "WhatsApp",
+      "hosts": [
+        "g.whatsapp.net", "g-fallback.whatsapp.net", "mmg.whatsapp.net", "mmg-fallback.whatsapp.net",
+        "api.whatsapp.net",
+        "pps.whatsapp.net", "static.whatsapp.net", "v.whatsapp.net", "web.whatsapp.com",
+        "whatsapp.com", "whatsapp.net", "wa.me",
+        "e1.whatsapp.net", "e2.whatsapp.net", "e3.whatsapp.net", "e4.whatsapp.net",
+        "e5.whatsapp.net", "e6.whatsapp.net", "e7.whatsapp.net", "e8.whatsapp.net",
+        "e9.whatsapp.net", "e10.whatsapp.net", "e11.whatsapp.net", "e12.whatsapp.net",
+        "e13.whatsapp.net", "e14.whatsapp.net", "e15.whatsapp.net", "e16.whatsapp.net"
+      ],
+      "meta_site_hosts": [
+        "whatsapp-chatd-edge-shv-{site}.facebook.com", "whatsapp-cdn-shv-{site}.fbcdn.net",
+        "edgeray-wa-wasp-shv-{site}.facebook.com", "edgeray-wa-group-shv-{site}.facebook.com",
+        "edgeray-wa-xpop-shv-{site}.facebook.com", "edgeray-wa-genai-shv-{site}.facebook.com",
+        "edgeray-biz-wa-shv-{site}.facebook.com"
+      ],
+      "ranges_url": null
+    },
+    "facebook_instagram": {
+      "label": "Facebook & Instagram",
+      "hosts": [
+        "edge-mqtt.facebook.com", "mqtt-mini.facebook.com", "gateway.facebook.com", "gateway.messenger.com",
+        "gateway.instagram.com", "chat-e2ee.facebook.com", "chat-e2ee-mini.facebook.com",
+        "web-chat-e2ee.facebook.com", "z-p42-chat-e2ee-ig.facebook.com",
+        "z-m-gateway.facebook.com", "test-gateway.instagram.com", "z-p4-gateway.facebook.com",
+        "z-p42-gateway.instagram.com", "mqtt-p4.facebook.com", "mqtt-ig-p4.facebook.com",
+        "chat-e2ee-ig.facebook.com", "z-p4-chat-e2ee.facebook.com", "edge-stun.facebook.com",
+        "facebook.com", "www.facebook.com", "m.facebook.com", "b-graph.facebook.com", "b-api.facebook.com",
+        "graph.facebook.com", "api.facebook.com", "edge-chat.facebook.com", "rupload.facebook.com",
+        "messenger.com", "www.messenger.com", "edge-chat.messenger.com", "m.me",
+        "instagram.com", "www.instagram.com", "b.i.instagram.com", "i.instagram.com", "graph.instagram.com",
+        "graphql.instagram.com", "edge-chat.instagram.com", "iglite-z.instagram.com", "iglite-d.instagram.com",
+        "star.fallback.c10r.facebook.com", "star-mini.fallback.c10r.facebook.com",
+        "mqtt.fallback.c10r.facebook.com", "dgw.fallback.c10r.facebook.com", "chat-e2ee-fallback.facebook.com",
+        "chat-e2ee-mini-fallback.facebook.com", "b-fallback.i.instagram.com", "i-fallback.instagram.com",
+        "graph-fallback.instagram.com",
+        "z-m-gateway-fallback.facebook.com", "test-gateway-fallback.instagram.com",
+        "z-p4-gateway-fallback.facebook.com", "z-p42-gateway-fallback.instagram.com",
+        "mqtt-mini-fallback.facebook.com", "mqtt-p4-fallback.facebook.com", "mqtt-ig-p4-fallback.facebook.com",
+        "chat-e2ee-ig-fallback.facebook.com", "z-p42-chat-e2ee-ig-fallback.facebook.com",
+        "z-p4-chat-e2ee-fallback.facebook.com", "z-p3-graph-fallback.facebook.com",
+        "edge-stun-fallback.facebook.com", "edge-chat-fallback.instagram.com", "iglite-d-fallback.instagram.com",
+        "iglite-z-fallback.instagram.com",
+        "scontent.xx.fbcdn.net", "video.xx.fbcdn.net", "scontent.cdninstagram.com",
+        "scontent.fallback.xx.fbcdn.net", "video.fallback.xx.fbcdn.net",
+        "snaptu-d.facebook.com", "snaptu-z.facebook.com", "fblite-p1.fallback.c10r.facebook.com",
+        "fblite-mini.fallback.c10r.facebook.com", "z-m-graph.facebook.com", "z-p4-graph.facebook.com"
+      ],
+      "meta_site_hosts": [
+        "edge-dgw-shv-{site}.facebook.com", "edge-dgw-mini-shv-{site}.facebook.com",
+        "edge-dgw-p4-shv-{site}.facebook.com", "edge-ig-dgw-shv-{site}.facebook.com",
+        "edge-ig-dgw-p42-shv-{site}.facebook.com", "edge-mqtt-shv-{site}.facebook.com",
+        "edge-mqtt-mini-shv-{site}.facebook.com", "edge-mqtt-p4-shv-{site}.facebook.com",
+        "edge-ig-mqtt-p4-shv-{site}.facebook.com", "edge-mqtt-latest-shv-{site}.facebook.com",
+        "edge-star-shv-{site}.facebook.com", "edge-star-mini-shv-{site}.facebook.com",
+        "edge-star-z-mini-shv-{site}.facebook.com", "edge-z-shv-{site}.facebook.com",
+        "edge-z-1-shv-{site}.facebook.com", "edge-z-1-p2-shv-{site}.facebook.com",
+        "edge-z-m-shv-{site}.facebook.com", "edge-z-m-mini-shv-{site}.facebook.com",
+        "edge-z-mini-shv-{site}.facebook.com", "edge-z-p1-shv-{site}.facebook.com",
+        "edge-z-p3-shv-{site}.facebook.com", "edge-z-p4-shv-{site}.facebook.com",
+        "edge-latest-shv-{site}.facebook.com", "edge-msgr-latest-shv-{site}.facebook.com",
+        "whatsapp-chatd-msgr-edge-shv-{site}.facebook.com",
+        "whatsapp-chatd-msgr-mini-edge-shv-{site}.facebook.com",
+        "whatsapp-chatd-msgr-p4-edge-shv-{site}.facebook.com",
+        "whatsapp-chatd-igd-edge-shv-{site}.facebook.com",
+        "whatsapp-chatd-igd-p42-edge-shv-{site}.facebook.com", "edge-iglite-p3-shv-{site}.facebook.com",
+        "edge-iglite-p42-shv-{site}.facebook.com", "edge-fblite-tcp-p1-shv-{site}.facebook.com",
+        "edge-fblite-tcp-mini-shv-{site}.facebook.com", "edge-fblite-ws-p1-shv-{site}.facebook.com",
+        "edge-stun-shv-{site}.facebook.com", "edgeray-msgr-shv-{site}.facebook.com",
+        "edgeray-turn-msgr-shv-{site}.facebook.com", "instagram-p3-shv-{site}.fbcdn.net",
+        "instagram-p42-shv-{site}.fbcdn.net"
+      ],
+      "ranges_url": null
+    },
+    "kakaotalk": {
+      "label": "KakaoTalk",
+      "hosts": ["booking-loco.kakao.com", "ticket-loco.kakao.com", "katalk.kakao.com", "talk-pilsner.kakao.com"],
+      "ranges_sources": [{"ripestat_asn": 7625}, {"ripestat_asn": 18160}, {"ripestat_asn": 38099},
+                         {"ripestat_asn": 152199}]
+    },
+    "viber": {
+      "label": "Viber",
+      "hosts": ["aloha.viber.com", "aloha46.viber.com", "api.viber.com", "fast.viber.com", "media.api.viber.com"],
+      "ranges_sources": [{"arin_name": "AWS-VIBER-MEDIA"}, {"arin_name": "AWS-VIBER"}]
+    }
+  },
+  "meta_sites": {
+    "owner_asn": 32934,
+    "servers": [
+      "01-akl1", "01-ams2", "01-ams3", "01-ams4", "01-amt2", "01-any2", "01-arn2", "01-ash5", "01-atl1",
+      "01-atl3", "01-bcn1", "01-ber1", "01-bkk1", "01-bog1", "01-bog2", "01-bom1", "01-bom2", "01-bos3",
+      "01-bos5", "01-bru2", "01-cai1", "01-ccu1", "01-cdg1", "01-cdg2", "01-cdg4", "01-cdt1", "01-cgk1",
+      "01-cgk2", "01-cph2", "01-cpt1", "01-del1", "01-del2", "01-den2", "01-den4", "01-dft4", "01-dfw1",
+      "01-dfw5", "01-doh1", "01-dub4", "01-dus1", "01-ecv1", "01-eze1", "01-fco1", "01-fco2", "01-fml1",
+      "01-fml2", "01-fml20", "01-fmx1", "01-for1", "01-fra2", "01-fra3", "01-fra5", "01-frt3", "01-frx5",
+      "01-gig2", "01-gig4", "01-gmp1", "01-gru1", "01-gru2", "01-gua1", "01-ham3", "01-hbe1", "01-hel2",
+      "01-hel3", "01-hkg1", "01-hkg2", "01-hkg3", "01-hkg4", "01-hkt1", "01-hou1", "01-hyd1", "01-iad3",
+      "01-icn1", "01-iev1", "01-ist1", "01-itm1", "01-jnb1", "01-jnb2", "01-kul1", "01-kul2", "01-kul3",
+      "01-kut2", "01-lax1", "01-lax3", "01-lcy1", "01-lga1", "01-lga3", "01-lhr2", "01-lhr3", "01-lhr6",
+      "01-lhr8", "01-lht6", "01-lim1", "01-lis1", "01-lla2", "01-los2", "01-maa2", "01-mad1", "01-mad2",
+      "01-man2", "01-mba1", "01-mct1", "01-mia1", "01-mia3", "01-mnl1", "01-mrs1", "01-mrs2", "01-msp1",
+      "01-mty2", "01-muc2", "01-mxp1", "01-mxp2", "01-nrt1", "01-ord1", "01-ord5", "01-ort2", "01-otp1",
+      "01-pao1", "01-pmo1", "01-pnq1", "01-prg1", "01-qro1", "01-scl1", "01-scl2", "01-sea1", "01-sin1",
+      "01-sin2", "01-sin4", "01-sin6", "01-sit4", "01-sjc2", "01-sjc3", "01-sju1", "01-sof1", "01-ssn1",
+      "01-syd1", "01-syd2", "01-tir2", "01-tir3", "01-tpe1", "01-vie1", "01-waw1", "01-waw2", "01-xsp1",
+      "01-xsp2", "01-xxb1", "01-xxc1", "01-xxd1", "01-xxe1", "01-yyz1", "01-zrh1", "02-ams2", "02-ams3",
+      "02-arn2", "02-atl1", "02-atl3", "02-bkk1", "02-bog2", "02-bom1", "02-bom2", "02-cai1", "02-ccu1",
+      "02-cdg1", "02-cdg2", "02-cdg4", "02-cgk1", "02-del1", "02-del2", "02-dft4", "02-dfw1", "02-dfw5",
+      "02-fra2", "02-fra3", "02-fra5", "02-frt3", "02-frx5", "02-gig4", "02-gru1", "02-gru2", "02-hbe1",
+      "02-hkg1", "02-hkg2", "02-hkg3", "02-hkg4", "02-hkt1", "02-iad3", "02-ist1", "02-kul1", "02-kul2",
+      "02-kut2", "02-lax1", "02-lax3", "02-lcy1", "02-lga1", "02-lga3", "02-lhr2", "02-lhr3", "02-lhr6",
+      "02-lhr8", "02-maa2", "02-mad1", "02-mia1", "02-mia3", "02-mnl1", "02-mrs2", "02-mxp1", "02-nrt1",
+      "02-ord1", "02-ord5", "02-ort2", "02-pao1", "02-pnq1", "02-qro1", "02-sin2", "02-sin6", "02-sof1",
+      "02-syd1", "02-tir2", "02-tir3", "02-tpe1", "02-vie1", "02-waw2", "02-xsp1", "03-ams2", "03-ams3",
+      "03-ash5", "03-atl1", "03-atn1", "03-atn2", "03-bom2", "03-cdg1", "03-cdg2", "03-cdg4", "03-dft4",
+      "03-dfw1", "03-fra2", "03-fra3", "03-frc1", "03-gru1", "03-hkg1", "03-lax1", "03-lga1", "03-lhr2",
+      "03-lhr3", "03-lla1", "03-mad1", "03-mia1", "03-mrs2", "03-mxp1", "03-nrt1", "03-ord1", "03-prn2",
+      "03-sea1", "03-sgp1", "03-sin1", "03-sin6", "03-sjc1", "03-vie1", "03-xdc1", "03-xsp1", "04-ams2",
+      "04-ams3", "04-atl1", "04-cdg1", "04-cdg2", "04-dfw1", "04-fra2", "04-fra3", "04-frc3", "04-gru1",
+      "04-hkg1", "04-iad1", "04-lax1", "04-lga1", "04-lhr2", "04-lhr3", "04-mad1", "04-mia1", "04-mxp1",
+      "04-nrt1", "04-ord1", "04-prn2", "04-sea1", "04-sin1", "04-sin6", "04-sjc1", "04-vie1", "05-ams2",
+      "05-ams3", "05-cdg1", "05-cdg2", "05-dfw1", "05-fra2", "05-fra3", "05-gru1", "05-iad1", "05-lax1",
+      "05-lga1", "05-lhr2", "05-lhr3", "05-mad1", "05-mia1", "05-mxp1", "05-nrt1", "05-ord1", "05-sea1",
+      "05-sin1", "05-sjc1", "05-vie1", "06-ams2", "06-ams3", "06-atn1", "06-cdg1", "06-cdg2", "06-dfw1",
+      "06-fra2", "06-fra3", "06-gru1", "06-iad1", "06-lax1", "06-lga1", "06-lhr2", "06-lhr3", "06-lla1",
+      "06-mad1", "06-mia1", "06-mxp1", "06-nrt1", "06-ord1", "06-prn1", "06-sea1", "06-sin1", "06-sjc1",
+      "06-vie1", "07-ams2", "07-ams3", "07-ash4", "07-cdg2", "07-dfw1", "07-fra2", "07-fra3", "07-frc3",
+      "07-gru1", "07-iad1", "07-lga1", "07-lhr2", "07-lhr3", "07-mia1", "07-mxp1", "07-ord1", "07-sin1",
+      "07-vie1", "08-ams2", "08-ams3", "08-ash6", "08-cdg2", "08-dfw1", "08-fra2", "08-fra3", "08-gru1",
+      "08-iad1", "08-lga1", "08-lhr2", "08-lhr3", "08-mia1", "08-mxp1", "08-ord1", "08-prn1", "08-sin1",
+      "08-vie1", "09-ams2", "09-ams3", "09-cdg2", "09-dfw1", "09-fra2", "09-fra3", "09-frc1", "09-iad1",
+      "09-lga1", "09-lhr2", "09-lhr3", "09-lla1", "09-mia1", "09-mxp1", "09-ord1", "09-sin1", "10-ams2",
+      "10-ams3", "10-cdg2", "10-dfw1", "10-fra2", "10-fra3", "10-iad1", "10-lga1", "10-lhr3", "10-lla2",
+      "10-mia1", "10-mxp1", "10-ord1", "10-sin1", "11-ams2", "11-ams3", "11-ash2", "11-cdg2", "11-dfw1",
+      "11-fra3", "11-iad1", "11-lhr3", "11-mia1", "11-mxp1", "11-sin1", "12-ams2", "12-ams3", "12-ash3",
+      "12-cdg2", "12-dfw1", "12-fra3", "12-frc1", "12-frc3", "12-iad1", "12-lhr3", "12-lla1", "12-mia1",
+      "12-prn1", "12-sin1", "13-ams2", "13-ams3", "13-atn1", "13-cdg2", "13-fra3", "13-frc1", "13-mia1",
+      "14-cdg2", "14-fra3", "15-cdg2", "15-fra3", "15-mia1", "16-fra3", "16-mia1", "17-prn1", "18-prn1",
+      "21-frc1", "27-frc1", "38-prn1", "72-xsg1"
+    ]
+  },
+  "protected_hosts": [
+    "facebook.com", "www.facebook.com", "graph.facebook.com", "edge-mqtt.facebook.com",
+    "www.instagram.com", "i.instagram.com",
+    "g.whatsapp.net", "g-fallback.whatsapp.net", "web.whatsapp.com", "mmg.whatsapp.net", "mmg-fallback.whatsapp.net",
+    "www.apple.com", "www.icloud.com", "gateway.icloud.com", "setup.icloud.com",
+    "www.google.com", "www.youtube.com", "www.googleapis.com", "play.googleapis.com",
+    "android.clients.google.com", "classroom.google.com", "connectivitycheck.gstatic.com",
+    "www.microsoft.com", "login.live.com", "login.microsoftonline.com", "outlook.office365.com",
+    "teams.microsoft.com"
+  ],
+  "protected_owners": {
+    "facebook.com": "facebook_instagram", "www.facebook.com": "facebook_instagram",
+    "graph.facebook.com": "facebook_instagram", "edge-mqtt.facebook.com": "facebook_instagram",
+    "www.instagram.com": "facebook_instagram", "i.instagram.com": "facebook_instagram",
+    "g.whatsapp.net": "whatsapp", "g-fallback.whatsapp.net": "whatsapp",
+    "web.whatsapp.com": "whatsapp", "mmg.whatsapp.net": "whatsapp", "mmg-fallback.whatsapp.net": "whatsapp"
+  },
+  "notifications": {
+    "apple_ranges": ["17.249.0.0/16", "17.252.0.0/16", "17.57.144.0/22", "17.188.128.0/18", "17.188.20.0/23"],
+    "google_hosts": [
+      "mtalk.google.com", "mtalk4.google.com",
+      "alt1-mtalk.google.com", "alt2-mtalk.google.com", "alt3-mtalk.google.com", "alt4-mtalk.google.com",
+      "alt5-mtalk.google.com", "alt6-mtalk.google.com", "alt7-mtalk.google.com", "alt8-mtalk.google.com"
+    ],
+    "google_ports": "5228-5230",
+    "microsoft_hosts": [],
+    "microsoft_ranges_url": "https://download.microsoft.com/download/94dd9a8e-7790-4bd5-a9d2-7e108c23335c/WNSPublicIPs_20251022.xml"
+  },
+  "shared_cdn_sources": {
+    "akamai": [
+      "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS20940",
+      "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS16625"
+    ],
+    "cloudflare": "https://www.cloudflare.com/ips-v4",
+    "cloudfront": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+    "fastly": "https://api.fastly.com/public-ip-list"
+  }
+}

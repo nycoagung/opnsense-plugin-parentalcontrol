@@ -5,7 +5,9 @@
 #
 # Deliberately NOT a configd action: it deletes the action file and restarts
 # configd, and a script configd launched would be killed partway through that.
-# The config-side cleanup IS a configd action, invoked below.
+# The config-side cleanup is also a configd action, but it is run directly
+# below: configctl would report a refusal as "Execute error", with no exit
+# status to stop on.
 #
 # Device settings are left in config.xml, so reinstalling restores them. Pass
 # --purge to remove those too.
@@ -15,9 +17,13 @@ MVC=/usr/local/opnsense/mvc/app
 WWW=/usr/local/opnsense/www/js/widgets
 SCRIPTS=/usr/local/opnsense/scripts/OPNsense/ParentalControl
 ACTIONS=/usr/local/opnsense/service/conf/actions.d
+DATA=/var/db/parentalcontrol            # DATA_DIR in lib/markers.php
 
 echo "removing firewall objects and the cron job"
-configctl parentalcontrol uninstall || echo "  (configd action unavailable - continuing)"
+# --final: the files go next, so it also leaves the marker that stops any sync
+# from putting the objects back. It says why when it stops; the files stay, so
+# it can be run again.
+"$SCRIPTS/uninstall.php" --final || { echo "stopped: no file was removed" >&2; exit 1; }
 
 echo "removing files"
 rm -f "$WWW/ParentalControl.js" "$WWW/Metadata/ParentalControl.xml"
@@ -43,6 +49,10 @@ fi
 # rm unlinks: this script keeps reading from its own open descriptor, so
 # removing the directory it lives in mid-run is safe - unlike overwriting it.
 rm -rf "$SCRIPTS"
+# The learned server list, the sync lock and uninstall.php's marker. Last, after
+# $SCRIPTS: a sync still waiting for the lock then finds either the marker or its
+# own file gone, and changes nothing.
+rm -rf "$DATA"
 
 service configd restart >/dev/null 2>&1 || true
 echo "done - reload the GUI; Firewall > Parental Control is gone"
