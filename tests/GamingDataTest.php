@@ -81,15 +81,17 @@ check('data: the TCP game ports are the design\'s', $tcp,
     [[1119, 1120], [2099, 2099], [2567, 2567], [3724, 3724], [4530, 4533], [5736, 5736], [6112, 6119], [6695, 6709],
      [7348, 7351], [7500, 7509], [7770, 7770], [7777, 7777], [7800, 7802], [7850, 7854], [8393, 8400],
      [9090, 9093], [9339, 9339], [19090, 19093], [19132, 19133], [20500, 20500], [20510, 20510],
-     [25565, 25565], [27777, 27777], [28960, 28960], [30000, 35000], [37000, 37100], [50010, 50014],
+     [25565, 25565], [27777, 27777], [28960, 28960], [30000, 30009], [30101, 30101], [31601, 31601],
+     [37000, 37100], [50010, 50014],
      [65010, 65010], [65050, 65050]]);
 check('data: port lists are ordered, disjoint and within 1-65535',
     [badRanges($safe), badRanges($tcp)], [[], []]);
 
-/* chat, push notifications, internet calls, the Xbox network, web proxies, BitTorrent
-   and the Steam client itself: blocking any of these on TCP breaks what is not a game */
+/* chat, push notifications, internet calls, the Xbox network, web proxies, BitTorrent,
+   Plex streaming from another home and the Steam client itself: blocking any of these on
+   TCP breaks what is not a game */
 $needed = array_merge([5222, 5223, 5228, 5229, 5230, 5060, 5062, 3478, 3479, 3480, 3074, 4000, 8080, 8088, 8090,
-    8443, 6881], range(27014, 27050));
+    8443, 6881, 32400], range(27014, 27050));
 check('data: no port other services depend on is a game port',
     array_values(array_filter($needed, fn(int $p): bool => is_array($tcp) && badRanges($tcp) === []
         && inRanges($p, $tcp))),
@@ -166,6 +168,8 @@ check('data: alias suffixes are AWS load balancers and Global Accelerator', $dat
    of its own (Cloudflare Spectrum): its answers skip the alias and shared-CDN rules, so
    the list is kept to the names a test proved necessary. */
 $proxies = array_filter(array_map(fn(array $s): array => $s['proxy_hosts'] ?? [], $servers ?: []));
+check('data: a proxy answer counts only through Cloudflare\'s per-application proxy names',
+    $data['proxy_suffixes'] ?? null, ['.pacloudflare.com']);
 check('data: the proxy hosts are the design\'s', $proxies,
     ['last_war' => ['lastwar-game-tcp-cf-1.lastwarapp.net']]);
 $proxyList = array_merge(...array_values($proxies ?: [[]]));

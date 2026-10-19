@@ -124,15 +124,17 @@ class ProxyHosts(unittest.TestCase):
     address of its own: its answer passes the alias and shared-CDN rules, and must still
     be public."""
 
-    def run_proxy(self, chain, addresses):
+    def run_proxy(self, chain, addresses, passive=None):
         with tempfile.TemporaryDirectory() as d:
             data, messaging = Path(d, 'gaming.json'), Path(d, 'messaging.json')
-            data.write_text(json.dumps({'alias_suffixes': SUFFIXES, 'servers': {
-                'game': {'hosts': [], 'proxy_hosts': ['gate.game.example']}}}))
+            data.write_text(json.dumps({'alias_suffixes': SUFFIXES, 'proxy_suffixes': ['.pacloudflare.example'],
+                                        'servers': {'game': {'hosts': [], 'proxy_hosts': ['gate.game.example']}}}))
             messaging.write_text(json.dumps({'shared_cdn_ranges': ['198.51.100.0/24']}))
             with mock.patch.object(tool, 'resolve', return_value=(chain, addresses)), \
+                    mock.patch.object(tool, 'fetch', return_value=passive), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
-                rc = tool.main(['--data', str(data), '--messaging', str(messaging)])
+                rc = tool.main(['--data', str(data), '--messaging', str(messaging)]
+                               + (['--passive-dns'] if passive else []))
         return rc, out.getvalue()
 
     def test_answer_through_a_proxy_in_a_cdn_range_passes(self):
@@ -142,6 +144,18 @@ class ProxyHosts(unittest.TestCase):
 
     def test_non_public_answer_still_fails(self):
         self.assertEqual(self.run_proxy(['x.pacloudflare.example'], ['10.0.0.7'])[0], 1)
+
+    def test_a_record_of_its_own_fails(self):
+        """An ordinary proxied record answers with the name's own A record, on a shared address."""
+        self.assertEqual(self.run_proxy([], ['198.51.100.7'])[0], 1)
+
+    def test_a_shared_cdn_alias_fails(self):
+        self.assertEqual(self.run_proxy(['gate.game.example.cdn.cloudflare.example'], ['198.51.100.7'])[0], 1)
+
+    def test_its_own_proxy_alias_is_no_other_site(self):
+        """Passive DNS lists the proxy alias the name itself answers through."""
+        rc, out = self.run_proxy(['x.pacloudflare.example'], ['198.51.100.7'], passive='x.pacloudflare.example\n')
+        self.assertEqual(rc, 0, out)
 
 
 if __name__ == '__main__':

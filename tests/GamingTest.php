@@ -172,12 +172,23 @@ $hostServers = [
 ];
 check('hosts: the plain hosts of every game, each once', gameHosts($hostServers, 'hosts'), ['a.example', 'b.example']);
 check('hosts: the proxy hosts kept apart', gameHosts($hostServers, 'proxy_hosts'), ['p.example']);
-/* a proxy host is looked up with the suffix '': its answer counts through any alias,
-   and still only when public */
-check('answers: a proxy host\'s answer counts through any alias, if public',
-    plainAnswers([$a('x.pacloudflare.example', '203.0.113.8'), $a('x.pacloudflare.example', '10.0.0.8')],
-        'gate.game.example', ['']),
+/* A proxy host is looked up with no name of its own (''): only an answer through a
+   proxy suffix counts, so if the name becomes an ordinary proxied record (its own A
+   record) or a shared CDN alias, nothing is blocked. Still only public answers. */
+$pa = ['.pacloudflare.example'];
+check('answers: a proxy host\'s answer through its proxy alias counts, if public',
+    gameAnswers([$a('x.pacloudflare.example', '203.0.113.8'), $a('x.pacloudflare.example', '10.0.0.8')],
+        'gate.game.example', true, $elb, $pa),
     ['203.0.113.8']);
+check('answers: a proxy host answering with its own record counts for nothing',
+    gameAnswers([$a('gate.game.example', '203.0.113.8')], 'gate.game.example', true, $elb, $pa), []);
+check('answers: a proxy host answering through a shared CDN alias counts for nothing',
+    gameAnswers([$a('gate.game.example.cdn.cloudflare.example', '203.0.113.8')], 'gate.game.example', true, $elb, $pa),
+    []);
+check('answers: a plain host keeps its own record, and not a proxy alias',
+    gameAnswers([$a('game.example', '203.0.113.5'), $a('x.pacloudflare.example', '203.0.113.6')], 'game.example',
+        false, $elb, $pa),
+    ['203.0.113.5']);
 
 /* ---- drop plan ------------------------------------------------------------- */
 

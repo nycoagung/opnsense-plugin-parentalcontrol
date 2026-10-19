@@ -285,12 +285,12 @@ function refreshGamingServers(Backend $backend, string $table, array $gaming, ar
     putenv('RES_OPTIONS=timeout:1 attempts:1');
     $suffixes = array_values(array_filter((array)($gaming['alias_suffixes'] ?? []), 'is_string'));
     $servers = (array)($gaming['servers'] ?? []);
+    $proxySuffixes = array_values(array_filter((array)($gaming['proxy_suffixes'] ?? []), 'is_string'));
     $proxyHosts = gameHosts($servers, 'proxy_hosts');
-    /* a proxy host's answer counts through any alias (the suffix ''), still only if public */
-    $lookup = function (string $host) use ($suffixes, $proxyHosts) {
+    $lookup = function (string $host) use ($suffixes, $proxySuffixes, $proxyHosts) {
         $records = @dns_get_record($host, DNS_A);
         return $records === false ? false
-            : plainAnswers($records, $host, in_array($host, $proxyHosts, true) ? [''] : $suffixes);
+            : gameAnswers($records, $host, in_array($host, $proxyHosts, true), $suffixes, $proxySuffixes);
     };
     $hosts = array_values(array_unique(array_merge(gameHosts($servers, 'hosts'), $proxyHosts)));
     $found = resolveAll($hosts, $lookup, 10000, fn(): int => (int)(microtime(true) * 1000));
@@ -298,7 +298,8 @@ function refreshGamingServers(Backend $backend, string $table, array $gaming, ar
     /* Only the plain hosts' answers are learned, through the shared-CDN rule. A proxy
        host's address sits in a shared CDN's range, so it is kept by name instead, as
        messaging keeps a protected name's answer: the last one stands in for a failed
-       lookup for up to a week. The cache's protected entries hold them. */
+       lookup for up to a week. The cache's protected entries hold them: here addresses
+       to block, where messaging's are addresses never to block. */
     $proxySet = array_flip($proxyHosts);
     $plain = array_values(array_unique(array_merge([], ...array_values(array_diff_key($found['answers'], $proxySet)))));
     $learned = updateLearned($cache['learned'], $plain, ['addresses' => [], 'missing' => []],

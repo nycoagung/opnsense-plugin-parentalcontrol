@@ -9,8 +9,9 @@ balancer of the game's own). A host fails when it answers through any other alia
 (a CDN's), with an address in messaging.json's shared CDN ranges, with an address no
 public server has (FILTERED_ANSWERS, as the messaging data build uses), or not at
 all. A proxy host (proxy_hosts) is reached through a provider's proxy that gives
-that one name an address of its own, so it only has to answer with public
-addresses. --passive-dns also asks HackerTarget's reverse lookup which other names each
+that one name an address of its own, so it has to answer through one of
+gaming.json's proxy_suffixes, with public addresses, and may sit in a shared CDN
+range. --passive-dns also asks HackerTarget's reverse lookup which other names each
 address carries, and fails a host whose addresses also serve names outside the
 game's own domains (a provider's generic name for the address itself does not
 count), and a host whose lookup gets no list of names back, such as
@@ -117,16 +118,19 @@ def main(argv=None):
     data = json.loads(Path(args.data).read_text())
     cdn = [ipaddress.ip_network(c) for c in json.loads(Path(args.messaging).read_text())['shared_cdn_ranges']]
     suffixes = data['alias_suffixes']
+    proxy_suffixes = data.get('proxy_suffixes', [])
     failing = 0
     for game, server in data['servers'].items():
         proxies = server.get('proxy_hosts', [])
         domains = {'.'.join(h.split('.')[-2:]) for h in server.get('hosts', []) + proxies}
         for host in server.get('hosts', []) + proxies:
             chain, addresses = resolve(host)
-            # a proxy host's answer may come through any alias and from a shared CDN's
-            # range: the provider gives that one name an address of its own
-            found = (problems(host, chain, addresses, [''], []) if host in proxies
+            # a proxy host's answer must come through a proxy suffix, which gives that one
+            # name an address of its own, and may then sit in a shared CDN's range
+            found = (problems(host, chain, addresses, proxy_suffixes, []) if host in proxies
                      else problems(host, chain, addresses, suffixes, cdn))
+            if host in proxies and not chain:
+                found.append(f'{host} answers with a record of its own, not through a proxy of its own')
             if args.passive_dns:
                 for ip in addresses:
                     try:
@@ -137,6 +141,7 @@ def main(argv=None):
                     strangers = [n for n in seen
                                  if not any(n == d or n.endswith('.' + d) for d in domains)
                                  and not names_the_address(n, ip)
+                                 and n not in chain
                                  and not n.endswith(tuple(suffixes))]
                     if strangers:
                         found.append(f'{ip} also carries {", ".join(strangers[:5])}')

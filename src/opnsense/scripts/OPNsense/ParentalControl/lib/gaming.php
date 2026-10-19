@@ -147,6 +147,22 @@ function gamingRefusal(?string $objectsProblem, array $tableEntries): ?string
 }
 
 /**
+ * The addresses one game host's dns_get_record() answer adds to the block: a plain
+ * host's by plainAnswers(), and a proxy host's only through a proxy suffix, never a
+ * record of its own name, since an ordinary proxied record sits on a shared address.
+ *
+ * @param array<mixed>  $records       dns_get_record($host, DNS_A)
+ * @param array<string> $aliasSuffixes alias endings a plain host's answer may come through
+ * @param array<string> $proxySuffixes alias endings a proxy host's answer must come through
+ * @return list<string>
+ */
+function gameAnswers(array $records, string $host, bool $proxy, array $aliasSuffixes, array $proxySuffixes): array
+{
+    /* with no name of its own (''), only an answer through a proxy suffix counts */
+    return $proxy ? plainAnswers($records, '', $proxySuffixes) : plainAnswers($records, $host, $aliasSuffixes);
+}
+
+/**
  * The addresses in one game host's dns_get_record() answer that may be blocked.
  *
  * An answer counts when it is a plain record of the name asked, or comes through an
@@ -184,7 +200,7 @@ function plainAnswers(array $records, string $host, array $aliasSuffixes): array
  * One kind of host name across every game in gaming.json, each once: 'hosts', whose
  * answers must be the names' own, or 'proxy_hosts', reached through a provider's
  * proxy that gives that one name an address of its own (Cloudflare Spectrum), whose
- * answers skip the alias and shared-CDN rules.
+ * answers count only through a proxy suffix and skip the shared-CDN rule (gameAnswers()).
  *
  * @param array<mixed> $servers gaming.json's servers, read defensively
  * @return list<string>

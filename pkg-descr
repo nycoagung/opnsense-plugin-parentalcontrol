@@ -39,7 +39,7 @@ Plugin Changelog
   Nikki, Love and Deepspace, Last War: Survival, MONOPOLY GO!, Gossip Harbor and
   the Heart of Vegas, Lightning Link and Cashman casino games, Niantic's sign-in,
   which every Niantic game uses, or Vivox's in-game voice chat. Whiteout
-  Survival, Kingshot and eFootball are blocked by their TCP ports
+  Survival and Kingshot are blocked by their TCP ports
 * UDP to the local network, the firewall itself, Discord's own network and the
   messaging apps' own networks is never treated as gaming, so calls, a VPN back
   home and Discord voice keep working
