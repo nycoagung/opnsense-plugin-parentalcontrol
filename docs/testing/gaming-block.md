@@ -77,9 +77,17 @@ line twice (see "Upgrading from 0.0.2" in the README).
       Apply, it also shows, in red, "gaming objects missing: " and the objects; the
       sync that Apply runs creates them and the red text goes.
 - [ ] `pfctl -t NoGaming -T show` lists `<device-ip>`.
-- [ ] `pfctl -t Gaming_Exempt -T show | head -20` shows the local networks
-      (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4,
-      255.255.255.255) and the firewall's own addresses.
+
+`Gaming_Exempt` holds thousands of entries in address order, so test it rather
+than read it. The first command tries an address in each local network, multicast
+and broadcast; the second tries every address of the firewall's own:
+
+    pfctl -t Gaming_Exempt -T test 10.1.2.3 172.16.1.2 192.168.77.7 169.254.1.2 239.255.255.250 255.255.255.255
+    pfctl -t Gaming_Exempt -T test `ifconfig -a | awk '$1 == "inet" {print $2}' | grep -v '^127\.'`
+
+- [ ] The first answers `6/6 addresses match.`
+- [ ] The second answers `N/N addresses match.`, N being the number of addresses it
+      tried.
 
 ## 4 The games, while blocked
 
@@ -94,7 +102,16 @@ it is by default, a match in progress ends rather than carrying on.
 ## 5 Still working on the blocked device
 
 Calls come first. Before the calls, note the packet counts of the three gaming
-rules: `pfctl -vvsr | grep -A2 'block gaming UDP\|block gaming TCP\|block game servers'`.
+rules. pf labels each rule with its uuid rather than its description, and expands
+the UDP rule into one rule per port range and interface, so this command reads the
+labels from `/tmp/rules.debug` and adds up each rule's counts. (The statistics
+under Firewall > Rules are cached for five minutes, too long for a before and
+after.)
+
+    pfctl -sr -v | awk 'NR == FNR { if (index($0, "# Parental Control: block gam") && match($0, /label "[^"]+"/)) d[substr($0, RSTART + 7, RLENGTH - 8)] = substr($0, index($0, "block gam")); next } /^[^ ]/ { r = ""; if (match($0, /label "[^"]+"/)) r = d[substr($0, RSTART + 7, RLENGTH - 8)]; if (length(r)) n[r] += 0; next } length(r) { for (i = 1; i < NF; i++) if ($i == "Packets:") n[r] += $(i + 1) } END { c = 0; for (k in n) { print n[k], "packets:", k; c++ }; if (c < 3) print "only", c, "of the 3 gaming rules found" }' /tmp/rules.debug -
+
+It prints a line per rule, such as `13 packets: block gaming UDP`. If it says fewer
+than 3 rules were found, stop: the gaming rules are not loaded.
 
 - [ ] A WhatsApp voice call and a video call with `<other-device-ip>`, both ways,
       connect and hold for a minute.
@@ -106,10 +123,18 @@ rules: `pfctl -vvsr | grep -A2 'block gaming UDP\|block gaming TCP\|block game s
 - [ ] An ordinary phone call over Wi-Fi Calling connects (turn mobile data off,
       or check the status bar shows Wi-Fi Calling).
 - [ ] Web browsing, YouTube, an app-store download and notifications all work.
+- [ ] The local network works: casting or AirPlay to a TV or speaker, printing, or
+      a smart-home app reaching a device at home, whichever the device uses.
+- [ ] The device renews its address and keeps the internet: on an iPhone or iPad,
+      Settings > Wi-Fi > the network's (i) > Renew Lease; on Android, Wi-Fi off and
+      on again.
+- [ ] A game played over the local network, such as a Minecraft world opened to LAN
+      on `<other-device-ip>`, can be joined (if the device has one): only online
+      games are blocked.
 - [ ] Discord text works, and a Discord voice channel connects (if installed).
 - [ ] A VPN back home, if the device uses one, connects; turn it off again after.
-- [ ] After the calls, the UDP rule's packet count has grown by a handful at most:
-      calls do not go through it.
+- [ ] After the calls, run the counting command again: the UDP rule's count has
+      grown by a handful at most, as calls do not go through it.
 
 If a call fails:
 
@@ -151,9 +176,10 @@ minutes from now. Keep Mode at Always allowed.
 
 With the device on Blocked, reboot the firewall.
 
-- [ ] After the reboot, the games still fail on the device and calls still work.
-- [ ] `pfctl -t Gaming_Exempt -T show | head -5` lists the local networks, and
-      `pfctl -t NoGaming -T show` lists `<device-ip>`.
+- [ ] After the reboot, the games still fail on the device, and calls and the local
+      network still work.
+- [ ] Both `pfctl -t Gaming_Exempt -T test` commands of section 3 answer as they
+      did there, and `pfctl -t NoGaming -T show` lists `<device-ip>`.
 
 ## 10 Status page throughout
 
@@ -162,12 +188,22 @@ With the device on Blocked, reboot the firewall.
 
 ## 11 Config-side uninstall rehearsal
 
-With the device still on Blocked:
+With the device still on Blocked, remove the plugin's firewall objects; its
+settings stay:
 
-    configctl parentalcontrol uninstall && configctl parentalcontrol sync
+    configctl parentalcontrol uninstall
 
-- [ ] The first command answers OK; the gaming rules and aliases are gone from
-      Firewall > Rules > Floating and Firewall > Aliases, and the games work.
+- [ ] It lists what it removed, a line each, among them `alias` lines for the five
+      gaming aliases and `removed table` lines for NoGaming, Gaming_Servers and
+      Gaming_Exempt; the gaming rules and aliases are gone from Firewall > Rules >
+      Floating and Firewall > Aliases.
+- [ ] `pfctl -s Tables` no longer lists NoGaming, Gaming_Servers or Gaming_Exempt.
+- [ ] The games work on the device again.
+
+Then put them back:
+
+    configctl parentalcontrol sync
+
 - [ ] The sync answers OK and puts them back, with the same names; the games fail
       again within a minute.
 - [ ] `pfctl -s Tables` lists NoGaming, Gaming_Servers and Gaming_Exempt again.
