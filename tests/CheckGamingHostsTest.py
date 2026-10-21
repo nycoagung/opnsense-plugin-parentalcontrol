@@ -131,6 +131,44 @@ class Main(unittest.TestCase):
         self.assertEqual(self.run_passive('notpublisher.example\n', publisher_domains=['publisher.example'])[0], 1)
 
 
+DIG_ANSWER = ('login.game.example.\t300\tIN\tCNAME\tlb-1.us-east-2.elb.amazonaws.com.\n'
+              'lb-1.us-east-2.elb.amazonaws.com. 60 IN\tA\t203.0.113.5\n'
+              'lb-1.us-east-2.elb.amazonaws.com. 60 IN\tA\t203.0.113.6\n')
+
+
+class Resolver(unittest.TestCase):
+    """--resolver asks a DNS server of the maintainer's choice, through dig, instead of
+    Google's public DNS over HTTPS, which some networks block."""
+
+    def run_resolver(self, dig_output):
+        with tempfile.TemporaryDirectory() as d:
+            data, messaging = Path(d, 'gaming.json'), Path(d, 'messaging.json')
+            data.write_text(json.dumps({'alias_suffixes': SUFFIXES,
+                                        'servers': {'game': {'hosts': ['login.game.example']}}}))
+            messaging.write_text(json.dumps({'shared_cdn_ranges': []}))
+            with mock.patch.object(tool, 'dig', return_value=dig_output) as dig, \
+                    mock.patch.object(tool, 'fetch', side_effect=AssertionError('asked the web, not the resolver')), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                rc = tool.main(['--data', str(data), '--messaging', str(messaging), '--resolver', '192.0.2.53'])
+        return rc, out.getvalue(), dig
+
+    def test_dig_lines_give_the_alias_chain_and_addresses(self):
+        self.assertEqual(tool.dig_answers(DIG_ANSWER),
+                         (['lb-1.us-east-2.elb.amazonaws.com'], ['203.0.113.5', '203.0.113.6']))
+
+    def test_hosts_are_resolved_through_the_given_server(self):
+        rc, out, dig = self.run_resolver(DIG_ANSWER)
+        self.assertEqual(rc, 0, out)
+        dig.assert_called_once_with('login.game.example', '192.0.2.53')
+        self.assertIn('203.0.113.5 203.0.113.6', out)
+
+    def test_a_name_the_server_filters_fails(self):
+        """A filtering resolver answers a name it blocks with nothing: the host fails, in sight."""
+        rc, out, _ = self.run_resolver('')
+        self.assertEqual(rc, 1)
+        self.assertIn('has no IPv4 answer', out)
+
+
 class ProxyHosts(unittest.TestCase):
     """A proxy host answers through its provider's proxy, which gives that one name an
     address of its own: its answer passes the alias and shared-CDN rules, and must still
