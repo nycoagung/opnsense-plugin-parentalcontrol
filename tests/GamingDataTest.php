@@ -178,6 +178,16 @@ check('data: every proxy host is a lower-case DNS name, listed once, and not als
         !preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $h))),
      count($proxyList) === count(array_unique($proxyList)), array_values(array_intersect($proxyList, $hosts))],
     [[], true, []]);
+/* Names that share a game host's address and belong to the game's publisher: the game's
+   own website, or the publisher's sign-in for its other games. Only the release check
+   (tools/check-gaming-hosts.py --passive-dns) reads them; nothing is blocked by them. */
+check('data: the publisher domains are the design\'s',
+    array_filter(array_map(fn(array $s): array => $s['publisher_domains'] ?? [], $servers ?: [])),
+    [
+        'gossip_harbor' => ['mergecookies.com'],
+        'heart_of_vegas' => ['heartofvegasslots.com', 'productmadness.com'],
+        'lightning_link' => ['productmadness.com'],
+    ]);
 
 /* ---- the settings model ---------------------------------------------------- */
 

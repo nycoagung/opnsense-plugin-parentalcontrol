@@ -60,15 +60,18 @@
     },
     "gossip_harbor": {
       "label": "Gossip Harbor",
-      "hosts": ["diary.cliapi-ga.mergesigma.com", "diary.cliapi-udp.mergesigma.com", "sso.cliapi-ga.mergesigma.com"]
+      "hosts": ["diary.cliapi-ga.mergesigma.com", "diary.cliapi-udp.mergesigma.com", "sso.cliapi-ga.mergesigma.com"],
+      "publisher_domains": ["mergecookies.com"]
     },
     "heart_of_vegas": {
       "label": "Heart of Vegas",
-      "hosts": ["heartofvegas.prd-01.vortex.hov.madness.games", "liveops.prd-01.vortex.hov.madness.games"]
+      "hosts": ["heartofvegas.prd-01.vortex.hov.madness.games", "liveops.prd-01.vortex.hov.madness.games"],
+      "publisher_domains": ["heartofvegasslots.com", "productmadness.com"]
     },
     "lightning_link": {
       "label": "Lightning Link Casino",
-      "hosts": ["lightninglink.prd-01.vortex.lnl.madness.games"]
+      "hosts": ["lightninglink.prd-01.vortex.lnl.madness.games"],
+      "publisher_domains": ["productmadness.com"]
     },
     "cashman_casino": {
       "label": "Cashman Casino",

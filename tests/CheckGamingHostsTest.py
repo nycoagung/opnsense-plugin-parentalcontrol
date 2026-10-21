@@ -83,13 +83,15 @@ class OtherNames(unittest.TestCase):
 
 
 class Main(unittest.TestCase):
-    def run_passive(self, reply):
+    def run_passive(self, reply, publisher_domains=None):
         """main() with --passive-dns on one host answering 203.0.113.5, and HackerTarget
         answering reply: (exit code, output)."""
+        server = {'hosts': ['play.game.example']}
+        if publisher_domains is not None:
+            server['publisher_domains'] = publisher_domains
         with tempfile.TemporaryDirectory() as d:
             data, messaging = Path(d, 'gaming.json'), Path(d, 'messaging.json')
-            data.write_text(json.dumps({'alias_suffixes': SUFFIXES,
-                                        'servers': {'game': {'hosts': ['play.game.example']}}}))
+            data.write_text(json.dumps({'alias_suffixes': SUFFIXES, 'servers': {'game': server}}))
             messaging.write_text(json.dumps({'shared_cdn_ranges': []}))
             with mock.patch.object(tool, 'resolve', return_value=([], ['203.0.113.5'])), \
                     mock.patch.object(tool, 'fetch', return_value=reply), \
@@ -117,6 +119,16 @@ class Main(unittest.TestCase):
     def test_a_name_of_a_neighbouring_address_still_fails(self):
         """55.113.0.203 holds 5.113.0.203 as text but is another address."""
         self.assertEqual(self.run_passive('55.113.0.203.bc.googleusercontent.com\n')[0], 1)
+
+    def test_a_name_of_the_games_publisher_passes(self):
+        """The game's own website, or its publisher's other names, may share its address."""
+        for name in ('publisher.example', 'www.publisher.example'):
+            with self.subTest(name=name):
+                self.assertEqual(self.run_passive(name + '\n', publisher_domains=['publisher.example'])[0], 0)
+
+    def test_a_name_that_only_ends_like_the_publishers_still_fails(self):
+        """notpublisher.example is another site, not a name under publisher.example."""
+        self.assertEqual(self.run_passive('notpublisher.example\n', publisher_domains=['publisher.example'])[0], 1)
 
 
 class ProxyHosts(unittest.TestCase):

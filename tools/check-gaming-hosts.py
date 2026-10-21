@@ -15,7 +15,9 @@ range. --passive-dns also asks HackerTarget's reverse lookup which other names e
 address carries, and fails a host whose addresses also serve names outside the
 game's own domains (a provider's generic name for the address itself does not
 count), and a host whose lookup gets no list of names back, such as
-once the day's free lookups are used up. Answers come from Google's public DNS, so
+once the day's free lookups are used up. A game's own domains are its hosts' and
+those in its publisher_domains: the game's website, or its publisher's names for
+other games, which may share the game's addresses. Answers come from Google's public DNS, so
 a local DNS filter cannot hide anything.
 
 Prints one line per host, then its problems, and exits 1 when any host has one. The
@@ -89,7 +91,7 @@ NO_NAMES = 'no dns a records found'     # HackerTarget's answer for an address w
 def other_names(ip):
     """The names HackerTarget's passive DNS has seen on ip; [] when it answers that it
     has none. Any other answer that is not names, such as its error or daily-quota
-    message (its free tier allows a few dozen lookups a day), raises ValueError: a
+    message (its free tier allows about 20 lookups a day), raises ValueError: a
     lookup that did not happen must not pass as one that found no other names."""
     text = fetch('https://api.hackertarget.com/reverseiplookup/?' + urllib.parse.urlencode({'q': ip}))
     names = [line.strip().lower() for line in text.splitlines() if line.strip()]
@@ -122,7 +124,8 @@ def main(argv=None):
     failing = 0
     for game, server in data['servers'].items():
         proxies = server.get('proxy_hosts', [])
-        domains = {'.'.join(h.split('.')[-2:]) for h in server.get('hosts', []) + proxies}
+        domains = ({'.'.join(h.split('.')[-2:]) for h in server.get('hosts', []) + proxies}
+                   | set(server.get('publisher_domains', [])))
         for host in server.get('hosts', []) + proxies:
             chain, addresses = resolve(host)
             # a proxy host's answer must come through a proxy suffix, which gives that one
