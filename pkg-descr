@@ -19,7 +19,8 @@ it lasts.
 A device can likewise be denied live online games, always or outside its
 allowed hours. The block goes by the kind of traffic games send: UDP to the
 internet is cut except on the few ports calls, Wi-Fi Calling, the web and the
-clock need, games' own TCP ports are cut, and a few games are blocked by their
+clock need, games' own TCP ports are cut, and the games on a list the parent
+edits, which starts with the games the plugin ships, are blocked by their
 servers' addresses. Calls, Wi-Fi Calling, the web, video and app downloads keep
 working.
 
@@ -27,6 +28,32 @@ WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 
 Plugin Changelog
 ----------------
+
+0.4.0
+
+* A Games tab holds the games whose servers are blocked for every device denied
+  gaming. It starts with the games the plugin ships, all switched on; the parent
+  adds, edits, deletes and switches games, each with its host names and address
+  ranges, and a change takes effect at the next sync
+* A release never changes or removes a game the list holds: it only adds the
+  games it newly ships, and a shipped game the parent deleted does not come back.
+  A new game whose name or host the list already has is left out and reported
+  once in the system log
+* Each game shows what it is blocked by and what it blocked at the last refresh,
+  or why nothing
+* Learned game-server addresses are remembered per host, so a game switched off
+  or deleted stops being blocked at the next sync, and a host whose lookup fails
+  keeps its addresses for up to 7 days
+* No game blocks an answer of the messaging block's protected names, an address
+  in a shared front end (the shared CDNs, Google's own front ends, Firebase
+  Hosting, Vercel, Netlify, GitHub Pages) or a destination never treated as
+  gaming, and a game with a host on a shared hosting service or a range that
+  overlaps a guarded one cannot be saved
+* Upgrading drops 0.3.0's learned game-server addresses, which no host was known
+  to have given; the first sync learns them again
+* tools/check-gaming-hosts.py counts a game publisher's own domains as the
+  game's, and can resolve through a chosen DNS server (--resolver)
+* tools/build-front-end-ranges.py generates Google's front ends
 
 0.3.0
 

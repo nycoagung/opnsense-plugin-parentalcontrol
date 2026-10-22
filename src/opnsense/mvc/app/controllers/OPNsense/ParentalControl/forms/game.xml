@@ -1,0 +1,39 @@
+<form>
+    <field>
+        <id>game.enabled</id>
+        <label>Enabled</label>
+        <type>checkbox</type>
+        <help>Switch off to stop blocking this game's servers at the next sync.</help>
+    </field>
+    <field>
+        <id>game.name</id>
+        <label>Name</label>
+        <type>text</type>
+        <help>The game's name, as the list shows it.</help>
+    </field>
+    <field>
+        <id>game.hosts</id>
+        <label>Hosts</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>The game's server names. While a device is denied gaming they are looked up every minute and the game's own addresses are blocked. Names on shared hosting services are refused.</help>
+    </field>
+    <field>
+        <id>game.proxy_hosts</id>
+        <label>Proxy hosts</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <advanced>true</advanced>
+        <help>Names reached through a provider's per-application proxy, such as Cloudflare Spectrum, which gives the name an address of its own. Leave empty unless the game uses one.</help>
+    </field>
+    <field>
+        <id>game.ranges</id>
+        <label>Address ranges</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>Public IPv4 networks the game uses, such as 192.0.2.0/24. Ranges that overlap shared services are refused.</help>
+    </field>
+</form>

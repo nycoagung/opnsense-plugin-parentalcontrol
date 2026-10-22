@@ -163,6 +163,11 @@ check('destinations: a server without ranges adds nothing',
 check('destinations: proxy hosts\' addresses added',
     gamingDestinations(['203.0.113.9' => 1], [], ['198.51.100.7', '203.0.113.9']),
     ['198.51.100.7', '203.0.113.9']);
+/* the refresh hands it the game list's entries (gameEntry()), keyed by uuid */
+check('destinations: the ranges of the game entries given',
+    gamingDestinations(['203.0.113.9' => 1], ['u1' => ['name' => 'G', 'enabled' => true, 'hosts' => [],
+        'proxy_hosts' => [], 'ranges' => ['198.51.100.0/24']]]),
+    ['198.51.100.0/24', '203.0.113.9']);
 
 /* ---- hosts ----------------------------------------------------------------- */
 

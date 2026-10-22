@@ -14,6 +14,8 @@
 $lib = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/lib';
 require $lib . '/markers.php';
 require $lib . '/messaging.php';
+require $lib . '/gaming.php';
+require $lib . '/games.php';
 
 $scripts = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl';
 $path = $argv[1] ?? $scripts . '/gaming.json';
@@ -178,6 +180,60 @@ check('data: every proxy host is a lower-case DNS name, listed once, and not als
         !preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $h))),
      count($proxyList) === count(array_unique($proxyList)), array_values(array_intersect($proxyList, $hosts))],
     [[], true, []]);
+/* Names that share a game host's address and belong to the game's publisher: the game's
+   own website, or the publisher's sign-in for its other games. Only the release check
+   (tools/check-gaming-hosts.py --passive-dns) reads them; nothing is blocked by them. */
+check('data: the publisher domains are the design\'s',
+    array_filter(array_map(fn(array $s): array => $s['publisher_domains'] ?? [], $servers ?: [])),
+    [
+        'gossip_harbor' => ['mergecookies.com'],
+        'heart_of_vegas' => ['heartofvegasslots.com', 'productmadness.com'],
+        'lightning_link' => ['productmadness.com'],
+    ]);
+
+/* Shared services no game may block: a host on a shared hosting domain is refused when
+   a game is saved, and an address in a shared front end is never blocked, whichever
+   game's host gave it. Google's front ends are generated
+   (tools/build-front-end-ranges.py); the others are the documented ones. */
+check('data: the shared hosting domains are the design\'s', $data['shared_hosting_domains'] ?? null, [
+    'akamaiedge.net', 'akamaihd.net', 'akamaized.net', 'appspot.com', 'cloudflare.net', 'cloudfront.net',
+    'edgekey.net', 'edgesuite.net', 'fastly.net', 'fastlylb.net', 'firebaseapp.com', 'github.io',
+    'googleapis.com', 'netlify.app', 'pages.dev', 'run.app', 'vercel.app', 'web.app', 'workers.dev',
+]);
+$frontEnds = is_array($data['shared_front_end_ranges'] ?? null) ? $data['shared_front_end_ranges'] : [];
+check('data: the documented front ends are pinned, and Google\'s is generated',
+    [array_diff_key($frontEnds, ['google' => true]), count((array)($frontEnds['google'] ?? [])) > 20],
+    [['firebase_hosting' => ['199.36.158.100/32'], 'vercel' => ['76.76.21.0/24'], 'netlify' => ['75.2.60.5/32'],
+      'github_pages' => ['185.199.108.0/22']], true]);
+$frontList = array_merge(...array_values(array_map(fn(mixed $l): array => (array)$l, $frontEnds ?: [[]])));
+check('data: every front-end range is a public IPv4 network',
+    [$frontList !== [], array_values(array_filter($frontList,
+        fn(mixed $r): bool => !is_string($r) || !isIpv4Cidr($r) || reachesNonPublic($r)))],
+    [true, []]);
+$serverRanges = array_merge(...array_values(array_map(fn(array $s): array => $s['ranges'] ?? [], $servers ?: [[]])));
+check('data: no shipped range overlaps a front-end range',
+    [$frontList !== [], array_values(array_filter($serverRanges, fn(string $r): bool => array_filter($frontList,
+        fn(string $f): bool => ipv4InCidr(explode('/', $r)[0], $f) || ipv4InCidr(explode('/', $f)[0], $r)) !== []))],
+    [true, []]);
+/* What the shipped games' plain hosts answered on 2026-10-21. The guards must leave
+   every one blockable, or a shipped game would quietly stop being blocked. Last War's
+   proxy answer sits in Cloudflare's range on purpose (its own rule), so only the
+   never-blocked set may not hold it. */
+$gameAddresses = [
+    '130.211.14.80', '35.201.114.128', '34.49.26.121', '8.214.160.189', '47.90.175.112', '8.216.77.226',
+    '8.216.77.38', '8.216.76.112', '47.245.92.113', '3.14.77.21', '3.150.147.73', '47.90.173.201',
+    '47.245.156.243', '8.221.196.109', '8.216.76.55', '47.90.174.161', '47.245.158.170', '8.221.200.47',
+    '8.216.76.234', '170.33.13.184', '166.117.55.137', '166.117.204.28', '136.107.113.253', '15.197.233.176',
+    '3.33.246.23', '100.48.146.215', '3.234.124.169', '3.229.210.1', '207.90.252.1', '207.90.253.1',
+    '207.90.252.2', '207.90.253.2', '34.36.77.148', '34.111.200.135', '34.149.89.120', '34.49.2.4',
+];
+$neverSet = neverBlocked([], $data, is_array($messaging) ? $messaging : null);
+$guardSet = array_merge($frontList, (array)($messaging['shared_cdn_ranges'] ?? []), $neverSet);
+check('data: the shipped games\' current addresses stay blockable',
+    [count($gameAddresses), $frontList !== [],
+     array_values(array_filter($gameAddresses, fn(string $ip): bool => ipv4InAny($ip, $guardSet))),
+     ipv4InAny('172.65.189.95', $neverSet)],
+    [36, true, [], false]);
 
 /* ---- the settings model ---------------------------------------------------- */
 
@@ -207,6 +263,55 @@ check('model: the internet alias name may not be any gaming alias name',
      (int)@preg_match($mask, 'NoMessaging'), (int)@preg_match($mask, 'NoInternet'),
      (int)@preg_match($mask, 'NoGamingAtNight')],
     [[0, 0, 0, 0, 0], 0, 1, 1]);
+/* the game list as the Games dialog edits it: host lists stored lower-case, so a
+   repeat is found whatever its case, and no address among them; ranges as networks */
+$type = fn(string $path): string => (string)($model->xpath("/model/items/$path")[0]['type'] ?? '');
+check('model: each game has on/off, a name, hosts, proxy hosts and ranges, as the dialog edits them',
+    [$type('games'), $type('games/enabled'), $field('games/enabled/Default'), $type('games/name'),
+     $field('games/name/Required'), $type('games/hosts'), $field('games/hosts/AsList'),
+     $field('games/hosts/IpAllowed'), $field('games/hosts/ChangeCase'), $type('games/proxy_hosts'),
+     $field('games/proxy_hosts/AsList'), $field('games/proxy_hosts/IpAllowed'),
+     $field('games/proxy_hosts/ChangeCase'), $type('games/ranges'), $field('games/ranges/AsList'),
+     $field('games/ranges/NetMaskRequired'), $field('games/ranges/AddressFamily'),
+     $field('games/ranges/WildcardEnabled'), $type('general/games_seen')],
+    ['ArrayField', 'BooleanField', '1', 'TextField', 'Y', 'HostnameField', 'Y', 'N', 'lower', 'HostnameField', 'Y',
+     'N', 'lower', 'NetworkField', 'Y', 'Y', 'ipv4', 'N', 'TextField']);
+/* The 1.4.0 migration adds every shipped game and core saves the result with
+   validation on, so one shipped game failing a check would refuse the whole upgrade;
+   a game a later release ships, added at the next sync, would be refused every
+   minute. So each must pass what a saved game must pass. */
+$shippedGames = array_map(fn(mixed $s): array => shippedEntry((array)$s), $servers ?: []);
+$refused = [];
+foreach ($shippedGames as $key => $game) {
+    $problems = gameProblems($game, array_diff_key($shippedGames, [$key => true]),
+        array_values(array_filter((array)($data['shared_hosting_domains'] ?? []), 'is_string')),
+        array_merge(guardedRanges($data, is_array($messaging) ? $messaging : null), $neverSet));
+    if ($problems !== []) {
+        $refused[$key] = $problems;
+    }
+}
+check('data: every shipped game passes the checks a saved game must pass', [count($shippedGames) > 0, $refused],
+    [true, []]);
+/* the host check above is stricter than the hosts' field; a range must carry its
+   prefix length (NetMaskRequired) and is kept as the table holds it */
+$nameMask = $field('games/name/Mask');
+$seenMask = $field('general/games_seen/Mask');
+$misfits = [];
+foreach ($shippedGames as $key => $game) {
+    if (@preg_match($seenMask, (string)$key) !== 1) {
+        $misfits[] = "key $key";
+    }
+    if (@preg_match($nameMask, $game['name']) !== 1) {
+        $misfits[] = "name {$game['name']}";
+    }
+    foreach ($game['ranges'] as $range) {
+        if (!str_contains($range, '/') || acceptRange($range) !== $range) {
+            $misfits[] = "range $range";
+        }
+    }
+}
+check('data: every shipped game\'s key, name and ranges fit their settings fields',
+    [$nameMask !== '', $seenMask !== '', $misfits], [true, true, []]);
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

@@ -1,6 +1,7 @@
 """Check the game hosts in gaming.json against live DNS before a release.
 
     python3 -I tools/check-gaming-hosts.py [--data FILE] [--messaging FILE] [--passive-dns]
+                                           [--resolver ADDRESS]
 
 A maintainer's tool, never installed. sync.php blocks every address a game host in
 gaming.json resolves to, so each host must answer with addresses of the game's own:
@@ -15,8 +16,12 @@ range. --passive-dns also asks HackerTarget's reverse lookup which other names e
 address carries, and fails a host whose addresses also serve names outside the
 game's own domains (a provider's generic name for the address itself does not
 count), and a host whose lookup gets no list of names back, such as
-once the day's free lookups are used up. Answers come from Google's public DNS, so
-a local DNS filter cannot hide anything.
+once the day's free lookups are used up. A game's own domains are its hosts' and
+those in its publisher_domains: the game's website, or its publisher's names for
+other games, which may share the game's addresses. Answers come from Google's
+public DNS, so a local DNS filter cannot hide anything. Where a network blocks DNS
+over HTTPS, --resolver asks another DNS server through dig instead; a name that
+server filters gets no answer, or a blocked one, and fails, so nothing passes unseen.
 
 Prints one line per host, then its problems, and exits 1 when any host has one. The
 output shows the DNS of the moment: read it, never commit it.
@@ -27,6 +32,7 @@ import importlib.util
 import ipaddress
 import json
 import re
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -75,12 +81,35 @@ def fetch(url):
         return response.read().decode()
 
 
-def resolve(host):
-    """host's alias chain and IPv4 answers, from Google's public DNS (JSON API)."""
+def resolve(host, server=None):
+    """host's alias chain and IPv4 answers: from Google's public DNS (JSON API), or from
+    the DNS server at address server, through dig."""
+    if server:
+        return dig_answers(dig(host, server))
     answer = json.loads(fetch('https://dns.google/resolve?' + urllib.parse.urlencode({'name': host, 'type': 'A'})))
     records = answer.get('Answer', [])
     return ([r['data'].rstrip('.') for r in records if r.get('type') == 5],
             [r['data'] for r in records if r.get('type') == 1])
+
+
+def dig(host, server):
+    """dig's answer lines for host's A records, asked of the DNS server at server."""
+    try:
+        return subprocess.run(['dig', '@' + server, host, 'A', '+noall', '+answer', '+time=5', '+tries=2'],
+                              capture_output=True, text=True, check=True).stdout
+    except FileNotFoundError:
+        raise SystemExit('--resolver needs dig, which is not installed') from None
+
+
+def dig_answers(text):
+    """The alias chain and IPv4 answers in dig's +answer lines (name, TTL, class, type, data)."""
+    chain, addresses = [], []
+    for fields in (line.split() for line in text.splitlines()):
+        if len(fields) >= 5 and fields[3] == 'CNAME':
+            chain.append(fields[4].rstrip('.'))
+        elif len(fields) >= 5 and fields[3] == 'A':
+            addresses.append(fields[4])
+    return chain, addresses
 
 
 NO_NAMES = 'no dns a records found'     # HackerTarget's answer for an address without names
@@ -89,7 +118,7 @@ NO_NAMES = 'no dns a records found'     # HackerTarget's answer for an address w
 def other_names(ip):
     """The names HackerTarget's passive DNS has seen on ip; [] when it answers that it
     has none. Any other answer that is not names, such as its error or daily-quota
-    message (its free tier allows a few dozen lookups a day), raises ValueError: a
+    message (its free tier allows about 20 lookups a day), raises ValueError: a
     lookup that did not happen must not pass as one that found no other names."""
     text = fetch('https://api.hackertarget.com/reverseiplookup/?' + urllib.parse.urlencode({'q': ip}))
     names = [line.strip().lower() for line in text.splitlines() if line.strip()]
@@ -114,6 +143,8 @@ def main(argv=None):
     parser.add_argument('--data', default=str(DATA), help='gaming.json to check')
     parser.add_argument('--messaging', default=str(MESSAGING), help='messaging.json, for its shared_cdn_ranges')
     parser.add_argument('--passive-dns', action='store_true', help='also list other names on each address')
+    parser.add_argument('--resolver', metavar='ADDRESS',
+                        help='resolve through this DNS server with dig, for a network that blocks DNS over HTTPS')
     args = parser.parse_args(argv)
     data = json.loads(Path(args.data).read_text())
     cdn = [ipaddress.ip_network(c) for c in json.loads(Path(args.messaging).read_text())['shared_cdn_ranges']]
@@ -122,9 +153,10 @@ def main(argv=None):
     failing = 0
     for game, server in data['servers'].items():
         proxies = server.get('proxy_hosts', [])
-        domains = {'.'.join(h.split('.')[-2:]) for h in server.get('hosts', []) + proxies}
+        domains = ({'.'.join(h.split('.')[-2:]) for h in server.get('hosts', []) + proxies}
+                   | set(server.get('publisher_domains', [])))
         for host in server.get('hosts', []) + proxies:
-            chain, addresses = resolve(host)
+            chain, addresses = resolve(host, args.resolver)
             # a proxy host's answer must come through a proxy suffix, which gives that one
             # name an address of its own, and may then sit in a shared CDN's range
             found = (problems(host, chain, addresses, proxy_suffixes, []) if host in proxies

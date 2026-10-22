@@ -40,7 +40,7 @@ use OPNsense\ParentalControl\ParentalControl;
    assumption about this particular network, so it stays correct anywhere. */
 const LOCAL_NETS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'];
 
-foreach (['markers.php', 'messaging.php', 'gaming.php', 'firewall.php', 'serverlist.php'] as $lib) {
+foreach (['markers.php', 'messaging.php', 'gaming.php', 'games.php', 'firewall.php', 'serverlist.php'] as $lib) {
     /* an older installer's file list leaves out the files added since */
     if (!is_file(__DIR__ . "/lib/$lib")) {
         fwrite(STDERR, "plugin files incomplete (missing lib/$lib): run 'configctl parentalcontrol install' again\n");
@@ -113,6 +113,25 @@ if ($tz !== '' && @timezone_open($tz) !== false) {
 
 $mdl = new ParentalControl();
 $backend = new Backend();
+
+/* Games a release newly ships join the list (addShippedGames()); status only reads.
+   A shipped game left out because the list already has its name or one of its hosts
+   is told here, once: its key is held from now on, so it is not offered again. It
+   goes to the system log too, since configd, which runs the cron job and Apply,
+   discards a script's output. If the save fails, this run blocks what the settings
+   hold. */
+if ($mode !== 'status') {
+    $offer = $mdl->addShippedGames(shippedServers(GAME_DATA_FILE));
+    foreach ($offer['clashes'] as $clash) {
+        fwrite(STDERR, "gaming: $clash\n");
+        log_msg("gaming: $clash", LOG_WARNING);
+    }
+    if ($offer['changed'] && !saveModel($mdl, 'games')) {
+        $mdl = new ParentalControl();
+    }
+}
+/* every game, by uuid; only the switched-on ones are looked up and blocked */
+$gameEntries = $mdl->gameEntries();
 
 /* Model fields are objects whose value is the text stored in config.xml:
    BooleanFields hold '1' or '0'. Read them with getValue() and compare with
@@ -591,7 +610,7 @@ if ($mode === 'status') {
         $gameError = gamingObjectsProblem($aliases, configRows('/opnsense/OPNsense/Firewall/Filter/rules/rule'))
             ?? (gamingData(GAME_DATA_FILE) === null ? GAME_DATA_MISSING : null);
     }
-    $gameCache = readCache(GAME_CACHE_FILE);
+    $gameCache = readGamingCache(GAME_CACHE_FILE);
     echo json_encode([
         'enabled' => $enabled,
         'cron' => cronState(),
@@ -623,9 +642,12 @@ if ($mode === 'status') {
             /* under a conflict those tables belong to someone else's aliases */
             'entries' => $gameConflict === null ? count(tableContents($backend, GAME_SERVERS_ALIAS)) : 0,
             'exempt_entries' => $gameConflict === null ? count(tableContents($backend, GAME_EXEMPT_ALIAS)) : 0,
-            'learned' => count($gameCache['learned']),
+            'learned' => count(learnedAddresses($gameCache['hosts'])),
             'refreshed_at' => $gameInUse ? $gameCache['refreshed_at'] : null,
             'errors' => $gameInUse ? $gameCache['errors'] : [],
+            /* what each game blocked at the last refresh, by uuid ({} when none) */
+            'games' => (object)($gameInUse ? $gameCache['games'] : []),
+            'games_enabled' => count(array_filter($gameEntries, fn(array $entry): bool => $entry['enabled'])),
             'in_use' => $gameInUse,
         ],
     ]);
@@ -1086,13 +1108,15 @@ if ($gameObjectsOk && $gameInUse && $gameData !== null) {
 
     /* then the game servers, before the device table, so a device newly denied
        gaming meets this run's list */
-    $gameCache = readCache(GAME_CACHE_FILE);
+    $gameCache = readGamingCache(GAME_CACHE_FILE);
     try {
         [$gameServers, $gameAddedServers, $gameCache] = refreshGamingServers(
             $backend,
             GAME_SERVERS_ALIAS,
+            $gameEntries,
             $gameData,
-            array_values(array_filter((array)($callNets['shared_cdn_ranges'] ?? []), 'is_string')),
+            $callNets,
+            $gameExempt,
             $gameCache,
             $addTo[GAME_SERVERS_ALIAS]
         );
@@ -1143,5 +1167,5 @@ if ($gameCache !== null) {
         fwrite(STDERR, "gaming: $error\n");
     }
     $gameCache['errors'] = array_merge($gameCache['errors'], $gameErrors);
-    writeCache(GAME_CACHE_FILE, $gameCache);
+    writeGamingCache(GAME_CACHE_FILE, $gameCache);
 }
