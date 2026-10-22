@@ -3,11 +3,13 @@
 /**
  * Table-driven tests for the game list's rules: a game's entry as the settings hold
  * it, which shipped games join the list, the checks a game must pass to be saved,
- * and the ranges no game may block.
+ * the ranges no game may block, what each host is remembered to give, what each
+ * game blocks and why, and the gaming cache.
  *
  * Runs anywhere PHP does - no OPNsense, no firewall, no network. A wrong answer here
  * is silent: a game the parent switched off stays blocked, a shipped game joins the
- * list twice, or a saved game blocks a shared service for every device denied gaming.
+ * list twice, a saved game blocks a shared service for every device denied gaming,
+ * or the Games list shows a game blocking what it does not.
  *
  *   php tests/GamesTest.php
  */
@@ -39,7 +41,7 @@ function row(string $name, string $hosts, string $proxyHosts = '', string $range
         'ranges' => $ranges]);
 }
 
-/* ---- entries ---------------------------------------------------------------- */
+/* ---- entries --------------------------------------------------------------- */
 
 check('entry: lists split, trimmed, lower-cased, without blanks or repeats',
     gameEntry(['enabled' => '1', 'name' => 'Game', 'hosts' => 'A.example, ,b.example,a.example', 'proxy_hosts' => '',
@@ -132,6 +134,160 @@ check('shipped servers: a schema-1 file\'s servers; anything else is null',
 foreach ($files as $file) {
     unlink($file);
 }
+
+/* ---- each host's remembered addresses -------------------------------------- */
+
+$now = 1000;
+$max = 100;
+check('learn: a fresh answer is stamped and kept with the host\'s earlier ones',
+    learnHosts(['h.example' => ['192.0.2.1' => 950]], ['h.example' => ['192.0.2.2']], ['h.example'], [], [], [],
+        $now, $max),
+    ['h.example' => ['192.0.2.1' => 950, '192.0.2.2' => 1000]]);
+check('learn: a host off the list loses its addresses at once',
+    learnHosts(['h.example' => ['192.0.2.1' => 950]], [], [], [], [], [], $now, $max), []);
+check('learn: a host with no answer this run keeps its recent addresses',
+    learnHosts(['h.example' => ['192.0.2.1' => 950, '192.0.2.2' => 990]], [], ['h.example'], [], [], [], $now, $max),
+    ['h.example' => ['192.0.2.1' => 950, '192.0.2.2' => 990]]);
+check('learn: addresses older than the maximum age go',
+    learnHosts(['h.example' => ['192.0.2.1' => 899, '192.0.2.2' => 900]], [], ['h.example'], [], [], [], $now, $max),
+    ['h.example' => ['192.0.2.2' => 900]]);
+$mixed = ['h.example' => ['192.0.2.1' => 950, '203.0.113.9' => 950]];
+$fresh = ['k.example' => ['192.0.2.2']];
+$both = ['h.example', 'k.example'];
+check('learn: a protected, never-blocked or shared address goes, whichever host gave it',
+    [learnHosts($mixed, $fresh, $both, ['192.0.2.1', '192.0.2.2'], [], [], $now, $max),
+     learnHosts($mixed, $fresh, $both, [], [], ['192.0.2.0/24'], $now, $max),
+     learnHosts($mixed, $fresh, $both, [], ['192.0.2.0/24'], [], $now, $max)],
+    array_fill(0, 3, ['h.example' => ['203.0.113.9' => 950]]));
+check('learn: hosts and addresses come out sorted',
+    learnHosts(['k.example' => ['203.0.113.9' => 950, '192.0.2.1' => 950]], ['a.example' => ['198.51.100.7']],
+        ['k.example', 'a.example'], [], [], [], $now, $max),
+    ['a.example' => ['198.51.100.7' => 1000], 'k.example' => ['192.0.2.1' => 950, '203.0.113.9' => 950]]);
+check('learned: every address once, with its latest time',
+    learnedAddresses(['a.example' => ['203.0.113.9' => 960, '192.0.2.1' => 990], 'b.example' => ['192.0.2.1' => 950]]),
+    ['192.0.2.1' => 990, '203.0.113.9' => 960]);
+
+/* ---- the guard every answer passes ----------------------------------------- */
+
+$cloud = ['198.51.100.0/24'];
+check('guard: a proxy answer in a shared range stays blockable; protected or never-blocked ones do not',
+    [blockable(['198.51.100.7'], [], $cloud, [], true), blockable(['198.51.100.7'], [], $cloud, [], false),
+     blockable(['198.51.100.7'], ['198.51.100.7'], $cloud, [], true),
+     blockable(['198.51.100.7'], ['198.51.100.7'], $cloud, [], false),
+     blockable(['198.51.100.7'], [], $cloud, $cloud, true), blockable(['198.51.100.7'], [], $cloud, $cloud, false)],
+    [['198.51.100.7'], [], [], [], [], []]);
+check('guard: what stays comes out sorted, each once',
+    blockable(['203.0.113.9', '192.0.2.1', '203.0.113.9'], [], [], [], false), ['192.0.2.1', '203.0.113.9']);
+
+/* ---- what each game blocks ------------------------------------------------- */
+
+$memory = ['h.example' => ['192.0.2.1' => 990, '192.0.2.2' => 990],
+    'k.example' => ['192.0.2.2' => 990, '192.0.2.3' => 990]];
+check('outcomes: switched off',
+    gameOutcomes(['u1' => row('G', 'h.example', '', '', '0')], $memory, [], [], ['192.0.2.1', '192.0.2.2']),
+    ['u1' => ['addresses' => 0, 'ranges' => 0, 'why' => 'switched off']]);
+check('outcomes: counts the addresses and ranges in the table',
+    gameOutcomes(['u1' => row('G', 'h.example, k.example', 'p.example', '198.51.100.0/24, 203.0.113.0/25')], $memory,
+        ['p.example' => ['addresses' => ['192.0.2.9'], 'seen' => 990]], [],
+        ['192.0.2.1', '192.0.2.2', '192.0.2.9', '198.51.100.0/24']),
+    ['u1' => ['addresses' => 3, 'ranges' => 1, 'why' => null]]);
+check('outcomes: a range typed with host bits counts as the network the table holds',
+    gameOutcomes(['u1' => row('G', '', '', '198.51.100.9/24')], [], [], [], ['198.51.100.0/24']),
+    ['u1' => ['addresses' => 0, 'ranges' => 1, 'why' => null]]);
+$ab = learnHosts([], ['a.example' => ['192.0.2.1'], 'b.example' => ['192.0.2.1']], ['a.example', 'b.example'], [],
+    [], [], $now, $max);
+$bOnly = learnHosts($ab, [], ['b.example'], [], [], [], $now + 60, $max);
+check('outcomes: an address two games share counts for both, and stays while one still gives it',
+    [gameOutcomes(['ua' => row('A', 'a.example'), 'ub' => row('B', 'b.example')], $ab, [], [],
+        array_keys(learnedAddresses($ab))),
+     learnedAddresses($bOnly),
+     gameOutcomes(['ua' => row('A', 'a.example', '', '', '0'), 'ub' => row('B', 'b.example')], $bOnly, [], [],
+        array_keys(learnedAddresses($bOnly)))],
+    [['ua' => ['addresses' => 1, 'ranges' => 0, 'why' => null], 'ub' => ['addresses' => 1, 'ranges' => 0, 'why' => null]],
+     ['192.0.2.1' => 1000],
+     ['ua' => ['addresses' => 0, 'ranges' => 0, 'why' => 'switched off'],
+      'ub' => ['addresses' => 1, 'ranges' => 0, 'why' => null]]]);
+$cdn = 'answers through a CDN or shared front end';
+$why = ['g.example' => 'every answer is guarded', 'c.example' => $cdn, 't.example' => 'not looked up in time',
+    'n.example' => 'no answer'];
+$whyOf = fn(string $hosts, string $proxyHosts = ''): ?string
+    => gameOutcomes(['u1' => row('G', $hosts, $proxyHosts)], [], [], $why, [])['u1']['why'];
+check('outcomes: why a game blocks nothing, host by host',
+    [$whyOf('g.example'), $whyOf('c.example'), $whyOf('t.example'), $whyOf('n.example'), $whyOf('u.example'),
+     $whyOf('', 't.example')],
+    ['every answer is guarded', $cdn, 'not looked up in time', 'no answer', 'no answer', 'not looked up in time']);
+check('outcomes: why, when the hosts differ: guarded, then CDN, then time, then no answer',
+    [$whyOf('n.example, t.example, c.example, g.example'), $whyOf('n.example, t.example, c.example'),
+     $whyOf('n.example, t.example')],
+    ['every answer is guarded', $cdn, 'not looked up in time']);
+
+/* ---- why a host gave nothing to block -------------------------------------- */
+
+$own = ['host' => 'h.example', 'type' => 'A', 'ip' => '198.51.100.7'];
+$other = ['host' => 'h.example', 'type' => 'A', 'ip' => '203.0.113.9'];
+check('reason: not looked up in time', hostReason(null, [], [], [], []), 'not looked up in time');
+check('reason: the lookup failed', hostReason(false, [], [], [], []), 'no answer');
+check('reason: an empty answer', hostReason([], [], [], [], []), 'no answer');
+check('reason: a filtered answer (0.0.0.0 or a local address) is no answer',
+    [hostReason([['host' => 'h.example', 'type' => 'A', 'ip' => '0.0.0.0']], [], [], [], []),
+     hostReason([['host' => 'h.example', 'type' => 'A', 'ip' => '10.0.0.1']], [], [], [], [])],
+    ['no answer', 'no answer']);
+check('reason: records, but none of the host\'s own',
+    hostReason([['host' => 'h.cdn.example', 'type' => 'A', 'ip' => '198.51.100.7']], [], [], [], []), $cdn);
+check('reason: every answer in a shared range', hostReason([$own], ['198.51.100.7'], [], $cloud, []), $cdn);
+check('reason: every answer protected or never blocked, or some shared and the rest guarded',
+    [hostReason([$own], ['198.51.100.7'], ['198.51.100.7'], [], []),
+     hostReason([$own], ['198.51.100.7'], [], [], $cloud),
+     hostReason([$own, $other], ['198.51.100.7', '203.0.113.9'], ['198.51.100.7'], ['203.0.113.0/24'], [])],
+    array_fill(0, 3, 'every answer is guarded'));
+check('reason: one answer left to block is no reason',
+    hostReason([$own, $other], ['198.51.100.7', '203.0.113.9'], ['198.51.100.7'], [], []), null);
+
+/* ---- the gaming cache ------------------------------------------------------ */
+
+$empty = ['hosts' => [], 'proxy' => [], 'guard' => [], 'games' => [], 'refreshed_at' => null, 'errors' => []];
+check('cache: a 0.3.0 cache keeps its proxy memory and drops its unlinked addresses',
+    sanitizeGamingCache(['learned' => ['203.0.113.5' => 100],
+        'protected' => ['gate.game.example' => ['addresses' => ['198.51.100.7'], 'seen' => 100]],
+        'refreshed_at' => 5, 'errors' => ['x']]),
+    ['hosts' => [], 'proxy' => ['gate.game.example' => ['addresses' => ['198.51.100.7'], 'seen' => 100]],
+     'guard' => [], 'games' => [], 'refreshed_at' => 5, 'errors' => ['x']]);
+check('cache: a proxy memory of its own wins over 0.3.0\'s',
+    sanitizeGamingCache(['proxy' => [],
+        'protected' => ['gate.game.example' => ['addresses' => ['198.51.100.7'], 'seen' => 100]]])['proxy'], []);
+check('cache: anything but an object is an empty cache', [sanitizeGamingCache(null), sanitizeGamingCache('x')],
+    [$empty, $empty]);
+check('cache: damaged entries are dropped one by one',
+    sanitizeGamingCache([
+        'hosts' => ['h.example' => ['192.0.2.1' => 950, '10.0.0.1' => 950, '192.0.2.2' => '950'], 'k.example' => 'x'],
+        'proxy' => ['p.example' => ['addresses' => ['198.51.100.7'], 'seen' => 990],
+            'q.example' => ['addresses' => ['198.51.100.8', '10.0.0.1'], 'seen' => 990]],
+        'guard' => ['g.example' => ['addresses' => ['203.0.113.5'], 'seen' => 990],
+            'z.example' => ['addresses' => ['203.0.113.6'], 'seen' => '990']],
+        'games' => ['u1' => ['addresses' => 2, 'ranges' => 0, 'why' => null],
+            'u2' => ['addresses' => '2', 'ranges' => 0, 'why' => null],
+            'u3' => ['addresses' => 0, 'ranges' => 0, 'why' => 'no answer'],
+            'u4' => ['addresses' => 0, 'ranges' => 0, 'why' => 5], 'u5' => ['addresses' => 0, 'ranges' => 0]],
+        'refreshed_at' => 'x', 'errors' => ['e', 5]]),
+    ['hosts' => ['h.example' => ['192.0.2.1' => 950]],
+     'proxy' => ['p.example' => ['addresses' => ['198.51.100.7'], 'seen' => 990]],
+     'guard' => ['g.example' => ['addresses' => ['203.0.113.5'], 'seen' => 990]],
+     'games' => ['u1' => ['addresses' => 2, 'ranges' => 0, 'why' => null],
+         'u3' => ['addresses' => 0, 'ranges' => 0, 'why' => 'no answer']],
+     'refreshed_at' => null, 'errors' => ['e']]);
+$file = (string)tempnam(sys_get_temp_dir(), 'games');
+$cache = ['hosts' => ['h.example' => ['192.0.2.1' => 950, '192.0.2.2' => 990]],
+    'proxy' => ['p.example' => ['addresses' => ['198.51.100.7'], 'seen' => 990]], 'guard' => [],
+    'games' => ['u1' => ['addresses' => 2, 'ranges' => 1, 'why' => null],
+        'u2' => ['addresses' => 0, 'ranges' => 0, 'why' => 'switched off']],
+    'refreshed_at' => 1000, 'errors' => ['lookup failed: k.example']];
+writeGamingCache($file, $cache);
+check('cache: written and read back the same, an empty map as {}, for its owner only',
+    [readGamingCache($file), str_contains((string)file_get_contents($file), '"guard":{}'),
+     decoct(fileperms($file) & 0777), file_exists($file . '.tmp')],
+    [$cache, true, '600', false]);
+unlink($file);
+check('cache: a missing file reads as empty', readGamingCache($file), $empty);
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);
