@@ -29,12 +29,12 @@ namespace OPNsense\ParentalControl {
 
         /**
          * @param ?array<mixed> $servers
-         * @return array{added: list<string>, clashes: list<string>}
+         * @return array{added: list<string>, clashes: list<string>, changed: bool}
          */
         public function addShippedGames(?array $servers): array
         {
             $this->offered = $servers;
-            return ['added' => [], 'clashes' => []];
+            return ['added' => [], 'clashes' => [], 'changed' => false];
         }
     }
 }

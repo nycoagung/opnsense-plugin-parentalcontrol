@@ -207,7 +207,7 @@ function writeCache(string $path, array $cache): void
     ], JSON_INVALID_UTF8_SUBSTITUTE);
     if ($json === false || @file_put_contents($tmp, $json) === false
         || !@chmod($tmp, 0600) || !@rename($tmp, $path)) {
-        fwrite(STDERR, 'cannot write ' . $path . "\n");     /* the messaging or the gaming cache */
+        fwrite(STDERR, 'cannot write ' . $path . "\n");     /* the messaging cache; writeGamingCache() the gaming one */
     }
 }
 
@@ -263,61 +263,92 @@ function dropMessagingStates(Backend $backend, array $targets, array $added, arr
 }
 
 /**
- * Refresh the game-server list and load it into its table.
+ * Refresh the game servers from the game list and load them into their table.
  *
- * Resolves gaming.json's game hosts, keeping only the answers that are the hosts'
- * own (plainAnswers()) and not on a shared CDN; learns them for a week, as the
- * messaging list does, since a game's load balancers change address; adds each proxy
- * host's public answer, kept by name for a week (gameHosts()); and makes the table
- * hold them and the games' shipped ranges, each through acceptRange(). A failed
- * lookup never empties the list.
+ * Only the switched-on games are looked up. A plain host's answers are its own
+ * (plainAnswers()) and are remembered by host for a week (learnHosts()), since a
+ * game's load balancers change address: a host that fails or runs out of time keeps
+ * them, and a game switched off, deleted or edited loses its hosts' addresses at the
+ * next sync, while an address another game also gives stays. A proxy host's answer
+ * lies in its provider's shared range, so it is kept by name instead, as messaging
+ * keeps a protected name's answer (protectedGuard()).
  *
- * @param array<string, mixed> $gaming    gaming.json
- * @param array<string>        $cdnRanges messaging.json's shared_cdn_ranges; [] when it is unreadable
- * @param array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: ?list<string>, refreshed_at: ?int, errors: list<string>} $cache
- *        readCache() of the gaming cache
+ * No address is blocked that blockable() refuses: an answer of one of the messaging
+ * block's protected names, one in the never-blocked set, or, unless it is a proxy
+ * host's, one in a shared front end (guardedRanges()). Gaming has no app selection,
+ * so every protected name counts; they are looked up here and their answers kept for
+ * a week too. A protected name with no answer does not stop learning, as it does for
+ * messaging, or the games would go unblocked for as long as it fails.
+ *
+ * The table holds the learned addresses, the proxy hosts' and the games' ranges,
+ * each through acceptRange(). What each game blocks, and why when nothing, goes in
+ * the cache for the Games list (gameOutcomes()).
+ *
+ * @param array<string, array{name: string, enabled: bool, hosts: list<string>, proxy_hosts: list<string>, ranges: list<string>}> $entries
+ *        every game, by uuid (ParentalControl::gameEntries())
+ * @param array<string, mixed>  $gaming    gaming.json
+ * @param ?array<string, mixed> $messaging messaging.json, or null when it is unreadable
+ * @param array<string>         $exempt    neverBlocked() of this run
+ * @param array{hosts: array<string, array<string, int>>, proxy: array<string, array{addresses: list<string>, seen: int}>, guard: array<string, array{addresses: list<string>, seen: int}>, games: array<string, array{addresses: int, ranges: int, why: ?string}>, refreshed_at: ?int, errors: list<string>} $cache
+ *        readGamingCache()
  * @param bool $add false to only delete from the table (syncTable())
- * @return array{list<string>, list<string>, array{learned: array<string, int>, published: array<string, array{ranges: list<string>, fetched_at: int, failed_at?: int}>, protected: array<string, array{addresses: list<string>, seen: int}>, apps: list<string>, refreshed_at: int, errors: list<string>}}
+ * @return array{list<string>, list<string>, array{hosts: array<string, array<string, int>>, proxy: array<string, array{addresses: list<string>, seen: int}>, guard: array<string, array{addresses: list<string>, seen: int}>, games: array<string, array{addresses: int, ranges: int, why: ?string}>, refreshed_at: int, errors: list<string>}}
  *         this run's servers, the ones the table gained, and the cache to write
  */
-function refreshGamingServers(Backend $backend, string $table, array $gaming, array $cdnRanges, array $cache, bool $add): array
+function refreshGamingServers(Backend $backend, string $table, array $entries, array $gaming, ?array $messaging,
+    array $exempt, array $cache, bool $add): array
 {
     putenv('RES_OPTIONS=timeout:1 attempts:1');
-    $suffixes = array_values(array_filter((array)($gaming['alias_suffixes'] ?? []), 'is_string'));
-    $servers = (array)($gaming['servers'] ?? []);
-    $proxySuffixes = array_values(array_filter((array)($gaming['proxy_suffixes'] ?? []), 'is_string'));
-    $proxyHosts = gameHosts($servers, 'proxy_hosts');
-    $lookup = function (string $host) use ($suffixes, $proxySuffixes, $proxyHosts) {
-        $records = @dns_get_record($host, DNS_A);
-        return $records === false ? false
-            : gameAnswers($records, $host, in_array($host, $proxyHosts, true), $suffixes, $proxySuffixes);
+    $strings = fn(mixed $list): array => array_values(array_filter((array)$list, 'is_string'));
+    $suffixes = $strings($gaming['alias_suffixes'] ?? []);
+    $proxySuffixes = $strings($gaming['proxy_suffixes'] ?? []);
+    $on = array_filter($entries, fn(array $entry): bool => $entry['enabled']);
+    $hosts = gameHosts($on, 'hosts');
+    $proxyHosts = gameHosts($on, 'proxy_hosts');
+    $records = [];          /* each host's answer as looked up, for hostReason(); false when it failed */
+    $lookup = function (string $host) use (&$records, $suffixes, $proxySuffixes, $proxyHosts) {
+        $found = @dns_get_record($host, DNS_A);
+        $records[$host] = $found;
+        return $found === false ? false
+            : gameAnswers($found, $host, in_array($host, $proxyHosts, true), $suffixes, $proxySuffixes);
     };
-    $hosts = array_values(array_unique(array_merge(gameHosts($servers, 'hosts'), $proxyHosts)));
-    $found = resolveAll($hosts, $lookup, 10000, fn(): int => (int)(microtime(true) * 1000));
+    $nowMs = fn(): int => (int)(microtime(true) * 1000);
+    $found = resolveAll(array_values(array_unique(array_merge($hosts, $proxyHosts))), $lookup, 10000, $nowMs);
+    $protected = $strings($messaging['protected_hosts'] ?? []);
+    $answered = resolveAll($protected, function (string $host) {
+        $found = @dns_get_record($host, DNS_A);
+        return $found === false ? false : answerAddresses($found);
+    }, 5000, $nowMs);
+    /* stamped with the hour, as messaging's are, so the remembered answers change only
+       when an answer does */
     $hour = intdiv(time(), 3600) * 3600;
-    /* Only the plain hosts' answers are learned, through the shared-CDN rule. A proxy
-       host's address sits in a shared CDN's range, so it is kept by name instead, as
-       messaging keeps a protected name's answer: the last one stands in for a failed
-       lookup for up to a week. The cache's protected entries hold them: here addresses
-       to block, where messaging's are addresses never to block. */
+    $guard = protectedGuard($protected, $answered['answers'], $cache['guard'], $hour, 7 * 86400);
+    $shared = guardedRanges($gaming, $messaging);
+    $memory = learnHosts($cache['hosts'], $found['answers'], $hosts, $guard['addresses'], $shared, $exempt, $hour,
+        7 * 86400);
     $proxySet = array_flip($proxyHosts);
-    $plain = array_values(array_unique(array_merge([], ...array_values(array_diff_key($found['answers'], $proxySet)))));
-    $learned = updateLearned($cache['learned'], $plain, ['addresses' => [], 'missing' => []],
-        $cdnRanges, $hour, 7 * 86400);
-    $proxy = protectedGuard($proxyHosts, array_intersect_key($found['answers'], $proxySet), $cache['protected'],
-        $hour, 7 * 86400);
-    $checked = checkedRanges(['game servers' => gamingDestinations($learned, $servers, $proxy['addresses'])]);
+    $proxy = protectedGuard($proxyHosts, array_intersect_key($found['answers'], $proxySet), $cache['proxy'], $hour,
+        7 * 86400);
+    $proxied = blockable($proxy['addresses'], $guard['addresses'], $shared, $exempt, true);
+    $checked = checkedRanges(['game servers' => gamingDestinations(learnedAddresses($memory), $on, $proxied)]);
     $dest = $checked['ranges']['game servers'];
     $diff = syncTable($backend, $table, $dest, $add);
     printf("game servers=%d added=%d removed=%d\n", count($dest), count($diff['added']), count($diff['removed']));
 
+    /* a host not looked up in time has no records; a proxy host's answers are never
+       held back for lying in a shared range, so none is checked against one */
+    $why = [];
+    foreach (array_unique(array_merge($hosts, $proxyHosts)) as $host) {
+        $why[$host] = hostReason($records[$host] ?? null, $found['answers'][$host] ?? [], $guard['addresses'],
+            isset($proxySet[$host]) ? [] : $shared, $exempt);
+    }
     return [$dest, $diff['added'], [
-        'learned' => $learned,
-        'published' => [],
-        'protected' => $proxy['memory'],
-        'apps' => [],
+        'hosts' => $memory,
+        'proxy' => $proxy['memory'],
+        'guard' => $guard['memory'],
+        'games' => gameOutcomes($entries, $memory, $proxy['memory'], $why, $dest),
         'refreshed_at' => time(),
-        'errors' => array_merge(refreshErrors([$found], [], []), $checked['errors'], $diff['errors']),
+        'errors' => array_merge(refreshErrors([$found, $answered], [], []), $checked['errors'], $diff['errors']),
     ]];
 }
 

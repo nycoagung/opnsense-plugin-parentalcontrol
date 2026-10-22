@@ -62,15 +62,16 @@ class ParentalControl extends BaseModel
      *
      * @param ?array<mixed> $servers gaming.json's servers (shippedServers()); null,
      *        for a file that cannot be read, changes nothing
-     * @return array{added: list<string>, clashes: list<string>} the keys added, and a
-     *         line for each new game left out
+     * @return array{added: list<string>, clashes: list<string>, changed: bool} the keys
+     *         added, a line for each new game left out, and whether there is anything to
+     *         save: a game added or a new key held
      */
     public function addShippedGames(?array $servers): array
     {
         $games = $this->node('games');
         $held = $this->node('general.games_seen');
         if ($servers === null || !$games instanceof ArrayField || $held === null) {
-            return ['added' => [], 'clashes' => []];
+            return ['added' => [], 'clashes' => [], 'changed' => false];
         }
         $before = $held->getValue();
         $offer = gamesToAdd($servers, $before === '' ? [] : explode(',', $before), $this->gameEntries());
@@ -83,10 +84,13 @@ class ParentalControl extends BaseModel
                 'ranges' => implode(',', $game['ranges']),
             ]);
         }
-        if (implode(',', $offer['seen']) !== $before) {
+        /* every game added brings a new key, so the held keys tell whether anything changed */
+        $changed = implode(',', $offer['seen']) !== $before;
+        if ($changed) {
             $held->setValue(implode(',', $offer['seen']));
         }
-        return ['added' => array_map('strval', array_keys($offer['add'])), 'clashes' => $offer['clashes']];
+        return ['added' => array_map('strval', array_keys($offer['add'])), 'clashes' => $offer['clashes'],
+            'changed' => $changed];
     }
 
     /**
