@@ -116,12 +116,15 @@ $backend = new Backend();
 
 /* Games a release newly ships join the list (addShippedGames()); status only reads.
    A shipped game left out because the list already has its name or one of its hosts
-   is told here, once: its key is held from now on, so it is not offered again. If
-   the save fails, this run blocks what the settings hold. */
+   is told here, once: its key is held from now on, so it is not offered again. It
+   goes to the system log too, since configd, which runs the cron job and Apply,
+   discards a script's output. If the save fails, this run blocks what the settings
+   hold. */
 if ($mode !== 'status') {
     $offer = $mdl->addShippedGames(shippedServers(GAME_DATA_FILE));
     foreach ($offer['clashes'] as $clash) {
         fwrite(STDERR, "gaming: $clash\n");
+        log_msg("gaming: $clash", LOG_WARNING);
     }
     if ($offer['changed'] && !saveModel($mdl, 'games')) {
         $mdl = new ParentalControl();

@@ -67,7 +67,7 @@ first time a device uses gaming (see Blocking gaming), found and named the same
 way as messaging's, with the same handling of a name someone else's alias holds:
 
 - `NoGaming`, the devices currently denied gaming
-- `Gaming_Servers`, the addresses of the games listed by name
+- `Gaming_Servers`, the addresses of the games on the Games tab
 - `Gaming_Exempt`, the destinations never treated as gaming
 - `Gaming_UDP_Ports`, a port alias holding every UDP port except the short list
   that calls, Wi-Fi Calling, the web and the clock need
@@ -283,11 +283,12 @@ ordinary apps use TCP, or QUIC on port 443. A device denied gaming:
   Duty, Battle.net, Riot's client, Warframe, World of Tanks, War Thunder, Destiny 2,
   Whiteout Survival and Kingshot (30101, 31601), eFootball's TCP matches (5736),
   and the default ports of common game-server software;
-- cannot reach the servers of a few games listed by name, whatever traffic they
-  use: Pokémon GO, Monster Hunter Now, Honkai Impact 3rd, Infinity Nikki, Love and
-  Deepspace, Last War: Survival, MONOPOLY GO!, Gossip Harbor, the Heart of Vegas,
-  Lightning Link and Cashman casino games, and in-game voice chat (Vivox), nor
-  Niantic's sign-in, which stops every Niantic game, listed or not.
+- cannot reach the servers of the games on the **Games** tab, whatever traffic
+  they use. The list starts with the games the plugin ships: Pokémon GO, Monster
+  Hunter Now, Honkai Impact 3rd, Infinity Nikki, Love and Deepspace, Last War:
+  Survival, MONOPOLY GO!, Gossip Harbor, the Heart of Vegas, Lightning Link and
+  Cashman casino games, in-game voice chat (Vivox), and Niantic's sign-in, which
+  stops every Niantic game, listed or not.
 
 | UDP ports a device denied gaming may still use | For |
 |---|---|
@@ -308,8 +309,9 @@ firewall's own addresses, so a VPN back home keeps working; Discord's own addres
 block, 66.22.192.0/18, for its voice; and the messaging apps' own networks as the
 messaging data ships them, so their calls keep working whatever port they pick.
 
-The games listed by name are looked up every minute through the firewall's own
-resolver, like the messaging apps, and their addresses are kept for 7 days. An
+The switched-on games' host names are looked up every minute through the firewall's
+own resolver, like the messaging apps, and each host's addresses are kept for 7
+days, so a lookup that fails for a while does not unblock a game. An
 answer counts only when it is public and the name's own: a plain record, or one of
 the game's own Amazon load balancers or Global Accelerators. An answer through any
 other alias, such as a CDN that other sites share, is left alone. One name is the
@@ -327,12 +329,61 @@ progress ends. No device is put in `NoGaming` until `Gaming_Exempt` holds the
 whole local set, and none while a gaming alias is renamed or missing, so a failed
 or unfinished load or a rename cannot cut a device off its own network.
 
+### Games
+
+The **Games** tab holds the games whose servers are blocked, for every device
+denied gaming. It starts with the games the plugin ships, all switched on, and from
+then on the list is yours: add a game with its name and the host names of its
+servers, and its address ranges if it publishes them; switch a game off or on; edit
+or delete it. A change takes effect at the next sync, within a minute. A game
+switched off or deleted, or a host taken off one, loses its addresses then; an
+address that another game's host also gives stays blocked for that game. **Proxy
+hosts**, under the dialog's advanced options, are names a provider's per-game proxy
+gives an address of its own, such as Last War's gateway; leave it empty otherwise.
+
+Each row shows what the game is blocked by ("8 hosts", "1 host, 2 ranges") and what
+it blocked at the last refresh ("12 addresses"). When that is nothing, the row says
+why: *switched off*; *no answer*, when its hosts did not resolve or resolved to a
+filtered address such as 0.0.0.0; *not looked up in time*, when the minute's lookup
+budget ran out; *answers through a CDN or shared front end*, which would block
+other sites too; or *every answer is guarded* (below). While no device is denied
+gaming nothing is looked up, and the column says *not in use*.
+
+**Guards.** Whatever the list holds, an address is never blocked when it is:
+
+- an answer of one of the messaging block's protected names, the essentials of
+  Google, Apple and Microsoft and the messaging apps' own sites, looked up every
+  minute and remembered for 7 days;
+- in a shared front end: the shared CDNs (Akamai, Cloudflare, CloudFront, Fastly)
+  and Google's own front ends, Firebase Hosting, Vercel, Netlify and GitHub Pages;
+- in the destinations never treated as gaming: Discord's address block and the
+  messaging apps' networks.
+
+A proxy host's answer is exempt from the second guard only, since a per-game proxy
+gives the name an address in its provider's range by design.
+
+**On save**, a game is refused, with the reason next to the field, when its name is
+taken (in any case), when it has no host, proxy host or range, when a host is
+already listed for it or another game, when a host is on a shared hosting service
+(such as `appspot.com`, `web.app`, `vercel.app`, `github.io`, `pages.dev` or a
+CDN's own domain), or when a range is not a public IPv4 network, is wider than a
+/8, or overlaps a guarded range. The shipped games pass the same checks.
+
+**Later releases** never change or remove a game the list holds, edited or not: a
+release only adds the games it newly ships, switched on. A shipped game you deleted
+does not come back. A newly shipped game whose name or one of whose hosts the list
+already has is not added; that is reported once, in the system log (System > Log
+Files > General), as a line with `gaming: <game> not added: the list already has
+...`.
+
 ### Gaming status
 
 The Status tab gains a **Gaming** column per device and a summary line built like
 messaging's: "Gaming: not in use", or "Gaming: N game-server entries · refreshed
-HH:MM", with any errors behind it and, in red, why gaming cannot be enforced. The
-status JSON carries a `gaming` key and per device `gaming`, `gaming_blocked` and
+HH:MM", then how many games are switched on, with any errors behind it and, in
+red, why gaming cannot be enforced. The status JSON carries a `gaming` key, with
+what each game blocked at the last refresh (`games`, by the game's uuid) and the
+number switched on (`games_enabled`), and per device `gaming`, `gaming_blocked` and
 `gaming_reason`.
 
 ## Addressing a device
@@ -486,6 +537,14 @@ empty, and nothing else in the settings changes.
 One install run is enough. Every device comes up with Gaming set to Not blocked,
 and nothing of gaming is made until a device uses it.
 
+## Upgrading from 0.3.0
+
+One install run is enough. The Games tab starts with the games 0.3.0 blocked, all
+switched on. 0.3.0's learned game-server addresses are dropped, because it did not
+record which host gave each one, so they could never go when a game does; the
+first sync after the upgrade looks the hosts up again, and the proxy host's kept
+answer carries over.
+
 ## Keeping it installed
 
 These files are not owned by a package, so a firmware upgrade can remove them.
@@ -555,8 +614,9 @@ drops off the dashboard. Note that `configctl parentalcontrol install` will not
 work afterwards, because the action file is one of the things it deletes; use the
 codeload bootstrap under Install to come back.
 
-Device settings stay in `config.xml`, so reinstalling restores them. Add
-`--purge` to remove those as well, the messaging and gaming settings included.
+Device settings and the game list stay in `config.xml`, so reinstalling restores
+them. Add `--purge` to remove those as well, the messaging and gaming settings and
+the game list included.
 
 The config-side cleanup is also available on its own as
 `configctl parentalcontrol uninstall` — useful to disable enforcement while
@@ -651,7 +711,7 @@ Blocking gaming is by the kind of traffic games send, which sets its own limits:
 
 - IPv4 only, and nothing on mobile data or another network.
 - Not blocked: browser games and other games that play over ordinary web traffic,
-  apart from the ones listed by name; Minecraft Java servers on a port other than
+  apart from the ones on the Games tab; Minecraft Java servers on a port other than
   25565; consoles, whose ports cover nearly all of UDP (the internet switch is the
   tool for them); cloud-gaming services that stream through call relays or port
   443; and Photon games and voice services that fall back to port 443.
@@ -679,7 +739,11 @@ Blocking gaming is by the kind of traffic games send, which sets its own limits:
 - A device connected to the home VPN reaches the firewall from its tunnel address,
   not its home address. Add the tunnel address as its own device with the same
   settings to cover it. This holds for the internet and messaging switches too.
-- The game hosts and ports are only as current as the installed plugin version.
+- The ports are only as current as the installed plugin version, and a game's hosts
+  as the release that added it: later releases never change a game the list holds,
+  so when a game moves to new servers, edit its hosts on the Games tab.
+- A game hosted on a shared front end, such as Google's or a CDN's, cannot be
+  blocked by address; only a DNS filter can block it.
 
 ## What has been verified, and what has not
 
@@ -692,10 +756,10 @@ renaming the alias in both directions, confirming the aliases rename in place, t
 rule follows, the old pf table is flushed, no duplicate pair appears and
 enforcement never lapses.
 
-**Tests.** Nine test files, which need no OPNsense and no network, only PHP 8.1 or
-later (with its dom, ctype, filter and SimpleXML extensions) and Python 3:
+**Tests.** Eleven test files, which need no OPNsense and no network, only PHP 8.1
+or later (with its dom, ctype, filter and SimpleXML extensions) and Python 3:
 
-    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; php tests/GamingTest.php; php tests/GamingDataTest.php; python3 -I tests/BuildMessagingDataTest.py; python3 -I tests/CheckGamingHostsTest.py
+    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; php tests/GamingTest.php; php tests/GamingDataTest.php; php tests/GamesTest.php; python3 -I tests/BuildMessagingDataTest.py; python3 -I tests/CheckGamingHostsTest.py; python3 -I tests/BuildFrontEndRangesTest.py
 
 Each prints a line per check and exits 1 when one fails. All pass, re-run on
 2026-10-22:
@@ -704,13 +768,15 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 |---|---|---|
 | `tests/ScheduleTest.php` | 19 | the schedule decision |
 | `tests/MessagingTest.php` | 173 | the messaging decision, the IPv4 helpers, the one check every range passes before a table, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
-| `tests/GamingTest.php` | 53 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the plain and proxy game hosts and which answers of each count, the game-servers table, the choice of connections to drop, the markers and the gaming alias names |
-| `tests/GamingDataTest.php` | 19 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, the one proxy host and its proxy suffix, the publisher domains, every range public and clear of the shared CDNs, and the settings model's Gaming field and alias-name rule |
+| `tests/GamingTest.php` | 54 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the plain and proxy game hosts and which answers of each count, the game-servers table from the game list, the choice of connections to drop, the markers and the gaming alias names |
+| `tests/GamingDataTest.php` | 27 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, the one proxy host and its proxy suffix, the publisher domains, every range public and clear of the shared CDNs, the shared hosting domains, the shared front ends (the documented ones pinned, Google's generated) and every front-end range public, the shipped games' current addresses left blockable by every guard, every shipped game passing the checks a saved game must pass and fitting its settings fields; and the settings model's Gaming field, alias-name rule and game fields |
+| `tests/GamesTest.php` | 50 | the game list: a game as the settings hold it, which shipped games join the list (never one deleted or already there by name or host), the checks a game must pass to be saved, the ranges no game may block, each host's remembered addresses (kept through a failed lookup, gone with its host, an address two games share kept while either gives it), the guard every answer passes (a proxy answer in a shared range stays blockable), what each game blocks and why when nothing, and the gaming cache (0.3.0's read, damaged entries dropped one by one, written and read back the same) |
 | `tests/CheckGamingHostsTest.py` | 24 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer; and that a passive-DNS lookup answered with an error or the daily-quota message fails the check instead of passing it, while a provider's generic name for the address itself, or a name under the game's publisher domains, is not taken for another site; that a proxy host must answer through a proxy name of its own, with a public address, which passive DNS does not take for another site; and that `--resolver` asks the given DNS server through dig, where a name the server filters fails |
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
-| `tests/MigrationTest.php` | 6 | the settings migration to 1.2.0: a saved selection gains the new apps, an empty one stays empty |
+| `tests/MigrationTest.php` | 8 | the settings migrations: to 1.2.0, a saved selection gains the new apps and an empty one stays empty; to 1.4.0, the game list is offered every shipped game, found beside the scripts |
 | `tests/FirewallTest.php` | 10 | loading a pf table: entries checked and put in pf's own form first, one pfctl call for the additions and one for the deletions, a failed call reported, and configd for each address only for a small change |
 | `tests/BuildMessagingDataTest.py` | 41 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and from Meta's per-site server names and checks them, that it stops behind a filtering or failing resolver and on a per-site list that shrank, that no address is in two apps' ranges, and its check of the protected names' owners |
+| `tests/BuildFrontEndRangesTest.py` | 4 | how the front-end tool takes Google's front ends: every range Google uses less the ranges its cloud customers get, adjacent ranges collapsed, nothing left when the cloud ranges cover everything, IPv6 and other keys ignored |
 
 **Mutation testing.** While the code was written, its checks were run against
 deliberately broken copies of what they cover: a comparison flipped, a guard
@@ -733,6 +799,12 @@ range check for every range, and the generator's stop on a filtering resolver, e
 shown failing first. For 0.3.0, 14 broken copies of `lib/gaming.php` were tried:
 one, at the top of the port range, was missed, and the check added for it catches
 it; the data file's checks were shown failing on broken copies of `gaming.json`.
+For the editable game list, 44 broken copies were tried: 31 of `lib/games.php` (its
+additions, save checks, per-host memory, outcomes and cache), 10 of the model, the
+1.4.0 migration and the data pins, 1 of the front ends and 2 of the Games tab's
+script, run outside the browser. All were caught but one, which only drops the
+hosts' validation message, wording no test pins; one more, a kept answer only half
+damaged, was missed at first, and the check added for it catches it.
 
 **Static analysis (0.3.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
 (9), over the plugin's scripts, library files, `controllers/` and model, its
@@ -981,6 +1053,23 @@ On a network that blocks DNS over HTTPS, `--resolver ADDRESS` resolves through t
 DNS server with `dig` instead, for example `--resolver 192.0.2.53`. A name the
 server filters gets no answer, or a blocked one, and fails the check rather than
 passing it.
+
+The game hosts the check passes reach only new installs: a release never changes a
+game a list already holds. A new game goes in `gaming.json` under a key the list
+has never held, which is how a running firewall knows to add it.
+
+**Before each release, regenerate Google's front ends.** No game may block an
+address in `shared_front_end_ranges` (`gaming.json`). Its `google` list is Google's
+own front ends, which Search, YouTube, Google's APIs and every site hosted on them
+share: every range Google publishes less the ones its cloud customers get, so a
+game served from Google Cloud stays blockable. It is generated:
+
+    python3 -I tools/build-front-end-ranges.py
+
+prints the list as one JSON line; paste it over the `google` list, read the diff,
+and run the tests. `tests/GamingDataTest.php` fails if a shipped game's current
+addresses fall inside a front end. Firebase Hosting, Vercel, Netlify and GitHub
+Pages are single documented addresses or ranges, kept by hand.
 
 **Before each release, check for a newer Microsoft WNS file.** The generator pins
 one dated file, `WNSPublicIPs_<date>.xml`, in `tools/messaging-sources.json`

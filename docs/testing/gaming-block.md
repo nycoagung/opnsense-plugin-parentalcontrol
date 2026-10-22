@@ -44,12 +44,13 @@ If the plugin is already installed, its own installer can fetch the branch inste
 
     env GH_REF=<branch> sh /usr/local/opnsense/scripts/OPNsense/ParentalControl/install.sh
 
-One run is enough from 0.1.0 or 0.2.0. On a firewall that still runs 0.0.2, run that
-line twice (see "Upgrading from 0.0.2" in the README).
+One run is enough from 0.1.0, 0.2.0 or 0.3.0. On a firewall that still runs 0.0.2,
+run that line twice (see "Upgrading from 0.0.2" in the README).
 
 - [ ] The installer ends with `done - reload the GUI, then see Firewall > Parental Control`.
 - [ ] After reloading the GUI, Firewall > Parental Control opens without an error.
 - [ ] Every existing device shows Gaming as Not blocked.
+- [ ] The Games tab lists the games `gaming.json` ships, every one switched on.
 
 ## 2 The page
 
@@ -213,6 +214,48 @@ Then put them back:
 - [ ] The sync answers OK and puts them back, with the same names; the games fail
       again within a minute.
 - [ ] `pfctl -s Tables` lists NoGaming, Gaming_Servers and Gaming_Exempt again.
+
+## 12 The Games tab
+
+With the test device still on Blocked:
+
+- [ ] Each game's row says what it is blocked by, such as "2 hosts" or "2 ranges",
+      and, within a minute, what it is blocking, such as "12 addresses", or why
+      nothing, such as "no answer".
+- [ ] The Status summary's gaming part ends with how many games are on.
+
+Switch off a game that shows addresses, one the test device has installed:
+
+- [ ] Within a minute its row says "switched off", and the Status summary's
+      game-server entries drop by about its count (less any address another game
+      also gives).
+- [ ] The game connects on the test device. Switch it on again: within a minute it
+      fails again, and the entries are back.
+
+Add a game, and try each of these in the dialog; each is refused with its message
+next to the field, and nothing is saved:
+
+- [ ] a host on a shared hosting service, such as `x.web.app`: "x.web.app is on a
+      shared hosting service, so blocking it would block other sites too."
+- [ ] the range `10.0.0.0/8`: "10.0.0.0/8 is not a public IPv4 network."
+- [ ] a range inside one of the shared CDNs' ranges (`shared_cdn_ranges` in
+      `messaging.json`): "… overlaps a shared service that is never blocked."
+- [ ] a name another game has, in other letters' case: "Another game already has
+      this name."
+- [ ] a host another game lists: "… is already listed for <that game>."
+- [ ] an address among the hosts: "… is not a host name. An address belongs under
+      Address ranges."
+
+Then save a game whose only host is a website served through a CDN:
+
+- [ ] Within a minute its row says "answers through a CDN or shared front end",
+      and the Status summary's game-server entries do not change.
+- [ ] Delete it: it leaves the list, and the entries still do not change.
+
+Run the installer a second time (`configctl parentalcontrol install`):
+
+- [ ] No game appears twice, and the games keep their settings.
+- [ ] The messaging summary's server entries are the same as before this section.
 
 ## Recording the results
 

@@ -38,27 +38,31 @@ P=src/opnsense
 
 [ -d "$MVC" ] || { echo "not an OPNsense system: $MVC missing" >&2; exit 1; }
 
-# The lib files, and messaging.json and gaming.json, which sync.php reads, are listed
-# before the scripts that need them: files are moved into place in list order.
+# The lib files, and messaging.json and gaming.json, which sync.php and the model
+# read, are listed first, before the model and scripts that need them: files are
+# moved into place in list order.
 FILES="
+$P/scripts/OPNsense/ParentalControl/lib/markers.php|$SCRIPTS/lib/markers.php
+$P/scripts/OPNsense/ParentalControl/lib/messaging.php|$SCRIPTS/lib/messaging.php
+$P/scripts/OPNsense/ParentalControl/lib/gaming.php|$SCRIPTS/lib/gaming.php
+$P/scripts/OPNsense/ParentalControl/lib/games.php|$SCRIPTS/lib/games.php
+$P/scripts/OPNsense/ParentalControl/lib/firewall.php|$SCRIPTS/lib/firewall.php
+$P/scripts/OPNsense/ParentalControl/lib/serverlist.php|$SCRIPTS/lib/serverlist.php
+$P/scripts/OPNsense/ParentalControl/messaging.json|$SCRIPTS/messaging.json
+$P/scripts/OPNsense/ParentalControl/gaming.json|$SCRIPTS/gaming.json
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml|$M/ParentalControl.xml
 $P/mvc/app/models/OPNsense/ParentalControl/ParentalControl.php|$M/ParentalControl.php
 $P/mvc/app/models/OPNsense/ParentalControl/Menu/Menu.xml|$M/Menu/Menu.xml
 $P/mvc/app/models/OPNsense/ParentalControl/ACL/ACL.xml|$M/ACL/ACL.xml
 $P/mvc/app/models/OPNsense/ParentalControl/Migrations/M1_2_0.php|$M/Migrations/M1_2_0.php
+$P/mvc/app/models/OPNsense/ParentalControl/Migrations/M1_4_0.php|$M/Migrations/M1_4_0.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/IndexController.php|$C/IndexController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/Api/SettingsController.php|$C/Api/SettingsController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/Api/ServiceController.php|$C/Api/ServiceController.php
 $P/mvc/app/controllers/OPNsense/ParentalControl/forms/device.xml|$C/forms/device.xml
+$P/mvc/app/controllers/OPNsense/ParentalControl/forms/game.xml|$C/forms/game.xml
 $P/mvc/app/controllers/OPNsense/ParentalControl/forms/general.xml|$C/forms/general.xml
 $P/mvc/app/views/OPNsense/ParentalControl/index.volt|$V/index.volt
-$P/scripts/OPNsense/ParentalControl/lib/markers.php|$SCRIPTS/lib/markers.php
-$P/scripts/OPNsense/ParentalControl/lib/messaging.php|$SCRIPTS/lib/messaging.php
-$P/scripts/OPNsense/ParentalControl/lib/gaming.php|$SCRIPTS/lib/gaming.php
-$P/scripts/OPNsense/ParentalControl/lib/firewall.php|$SCRIPTS/lib/firewall.php
-$P/scripts/OPNsense/ParentalControl/lib/serverlist.php|$SCRIPTS/lib/serverlist.php
-$P/scripts/OPNsense/ParentalControl/messaging.json|$SCRIPTS/messaging.json
-$P/scripts/OPNsense/ParentalControl/gaming.json|$SCRIPTS/gaming.json
 $P/scripts/OPNsense/ParentalControl/sync.php|$SCRIPTS/sync.php
 $P/scripts/OPNsense/ParentalControl/uninstall.php|$SCRIPTS/uninstall.php
 $P/scripts/OPNsense/ParentalControl/uninstall.sh|$SCRIPTS/uninstall.sh

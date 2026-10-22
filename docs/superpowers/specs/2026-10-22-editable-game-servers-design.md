@@ -129,8 +129,8 @@ These would make it a failure even if it works:
     `Migrations/` (only `M1_2_0.php` so far);
   - the API is `SettingsController` (the device actions are the pattern to follow);
   - forms live in `controllers/.../forms`, and the view is `index.volt`.
-- The installer must install any new file, and uninstall must remove the plugin's
-  settings, games included.
+- The installer must install any new file. Uninstall keeps the settings, games
+  included, as it keeps devices; `--purge` removes them.
 - Public repository: tests and docs use documentation values only (RFC 5737 addresses,
   `.example` names). Vendor data appears only in `gaming.json`, `messaging.json`,
   `tools/` and the data tests' pins.
