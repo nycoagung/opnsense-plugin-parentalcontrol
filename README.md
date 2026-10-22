@@ -341,6 +341,13 @@ address that another game's host also gives stays blocked for that game. **Proxy
 hosts**, under the dialog's advanced options, are names a provider's per-game proxy
 gives an address of its own, such as Last War's gateway; leave it empty otherwise.
 
+A game switched off can still be stopped by another row that covers it: every
+Niantic game signs in through the row *Niantic sign-in*, so Monster Hunter Now
+plays only when that row is off too, which lets every Niantic game sign in.
+Games blocked by their ports, such as Supercell's (Clash of Clans, Clash Royale,
+Hay Day) and Minecraft servers, are not on the tab: their ports are blocked for
+every device denied gaming, and cannot be switched off one game at a time.
+
 Each row shows what the game is blocked by ("8 hosts", "1 host, 2 ranges") and what
 it blocked at the last refresh ("12 addresses"). When that is nothing, the row says
 why: *switched off*; *no answer*, when its hosts did not resolve or resolved to a
@@ -947,6 +954,22 @@ continent, which led to blocking every Meta site.
   by its server's name, added after that run, and then it failed too;
 - the calls of the checklist's section 5 connected, and the UDP rule counted no
   packet while they ran.
+
+0.4.0 was installed on the same firewall from its branch, as an upgrade from
+0.3.0, and the same Android phone was denied gaming:
+
+- the Games tab listed the 13 shipped games, all switched on, and the settings held
+  their 13 keys;
+- each game's count of what it blocked added up to the game-server table exactly
+  (36 addresses and 2 ranges, 38 entries), and the messaging servers table was
+  unchanged;
+- switching Monster Hunter Now off took its server's address out of the table at
+  the next sync, but the game still could not sign in, because the row *Niantic
+  sign-in* was on; with that row off too, its address left the table and Monster
+  Hunter Now loaded on the phone, while Pokémon GO's stayed blocked.
+
+Not yet run on the firewall: the save checks in the Games dialog, a game hosted
+behind a CDN, and a second install over this one (the checklist's section 12).
 
 **Still to come:** the run of `tests/vm/uninstall-test.sh` on a disposable OPNsense
 26.7 virtual machine (it saves `config.xml`, installs, exercises all three
