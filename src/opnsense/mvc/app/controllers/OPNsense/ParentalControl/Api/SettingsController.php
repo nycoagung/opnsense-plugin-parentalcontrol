@@ -6,7 +6,7 @@ use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Core\Backend;
 
 /**
- * CRUD for the device list and general settings.
+ * CRUD for the device list, the game list and general settings.
  *
  * Schedule evaluation deliberately lives in scripts/sync.php rather than here,
  * so the widget, the settings page and the cron run all resolve a device's
@@ -49,6 +49,42 @@ class SettingsController extends ApiMutableModelControllerBase
     public function toggleDeviceAction(string $uuid, ?string $enabled = null): array
     {
         return $this->toggleBase('devices', $uuid, $enabled);
+    }
+
+    /** @return array<string, mixed> */
+    public function searchGameAction(): array
+    {
+        return $this->searchBase('games', ['enabled', 'name', 'hosts', 'proxy_hosts', 'ranges']);
+    }
+
+    /** @return array<string, mixed> */
+    public function getGameAction(?string $uuid = null): array
+    {
+        return $this->getBase('game', 'games', $uuid);
+    }
+
+    /** @return array<string, mixed> */
+    public function addGameAction(): array
+    {
+        return $this->addBase('game', 'games');
+    }
+
+    /** @return array<string, mixed> */
+    public function setGameAction(string $uuid): array
+    {
+        return $this->setBase('game', 'games', $uuid);
+    }
+
+    /** @return array<string, mixed> */
+    public function delGameAction(string $uuid): array
+    {
+        return $this->delBase('games', $uuid);
+    }
+
+    /** @return array<string, mixed> */
+    public function toggleGameAction(string $uuid, ?string $enabled = null): array
+    {
+        return $this->toggleBase('games', $uuid, $enabled);
     }
 
     /**

@@ -32,6 +32,91 @@
             },
         });
 
+        /* the gaming part of the last status, for what each game blocks; null until
+           the status has loaded (loadStatus()) */
+        var gameStatus = null;
+        /* a count with its noun: '1 host', '8 hosts' */
+        var counted = function (n, one, many) {
+            return (n === 1 ? one : many).replace('%s', n);
+        };
+        /* the reasons sync.php gives for a game that blocks nothing */
+        var whyText = {
+            'switched off': "{{ lang._('switched off') }}",
+            'no answer': "{{ lang._('no answer') }}",
+            'not looked up in time': "{{ lang._('not looked up in time') }}",
+            'answers through a CDN or shared front end': "{{ lang._('answers through a CDN or shared front end') }}",
+            'every answer is guarded': "{{ lang._('every answer is guarded') }}"
+        };
+        $("#grid-games").UIBootgrid({
+            search: '/api/parentalcontrol/settings/searchGame',
+            get: '/api/parentalcontrol/settings/getGame/',
+            set: '/api/parentalcontrol/settings/setGame/',
+            add: '/api/parentalcontrol/settings/addGame/',
+            del: '/api/parentalcontrol/settings/delGame/',
+            toggle: '/api/parentalcontrol/settings/toggleGame/',
+            options: {
+                formatters: {
+                    /* the name is the parent's own text: escaped, as the devices' are */
+                    safe: function (column, row) {
+                        return $('<div>').text(row[column.id] === undefined ? '' : row[column.id]).html();
+                    },
+                    /* no copy: it would repeat the game's name and hosts, which a save refuses */
+                    commands: function (column, row) {
+                        return '<button type="button" class="btn btn-xs btn-default command-edit bootgrid-tooltip" ' +
+                               'data-row-id="' + row.uuid + '"><span class="fa fa-pencil fa-fw"></span></button> ' +
+                               '<button type="button" class="btn btn-xs btn-default command-delete bootgrid-tooltip" ' +
+                               'data-row-id="' + row.uuid + '"><span class="fa fa-trash-o fa-fw"></span></button>';
+                    },
+                    /* what the game is blocked by, from its own lists */
+                    blockedBy: function (column, row) {
+                        var count = function (list) {
+                            return String(list || '').split(',').filter(function (item) {
+                                return item.trim() !== '';
+                            }).length;
+                        };
+                        var hosts = count(row.hosts), proxies = count(row.proxy_hosts), ranges = count(row.ranges);
+                        var parts = [];
+                        if (hosts) {
+                            parts.push(counted(hosts, "{{ lang._('%s host') }}", "{{ lang._('%s hosts') }}"));
+                        }
+                        if (proxies) {
+                            parts.push(counted(proxies, "{{ lang._('%s proxy host') }}", "{{ lang._('%s proxy hosts') }}"));
+                        }
+                        if (ranges) {
+                            parts.push(counted(ranges, "{{ lang._('%s range') }}", "{{ lang._('%s ranges') }}"));
+                        }
+                        return $('<div>').text(parts.join(', ')).html();
+                    },
+                    /* what the last refresh blocked for the game, or why nothing */
+                    blocking: function (column, row) {
+                        if (gameStatus === null) {
+                            return '';
+                        }
+                        var outcome = (gameStatus.games || {})[row.uuid];
+                        var text;
+                        if (!gameStatus.in_use) {
+                            text = "{{ lang._('not in use') }}";
+                        } else if (outcome === undefined) {
+                            text = "{{ lang._('not refreshed yet') }}";
+                        } else if (outcome.addresses || outcome.ranges) {
+                            var parts = [];
+                            if (outcome.addresses) {
+                                parts.push(counted(outcome.addresses, "{{ lang._('%s address') }}",
+                                    "{{ lang._('%s addresses') }}"));
+                            }
+                            if (outcome.ranges) {
+                                parts.push(counted(outcome.ranges, "{{ lang._('%s range') }}", "{{ lang._('%s ranges') }}"));
+                            }
+                            text = parts.join(', ');
+                        } else {
+                            text = whyText[outcome.why] || outcome.why || '';
+                        }
+                        return $('<div>').text(text).html();
+                    }
+                }
+            },
+        });
+
         /*
          * Address suggestions from Dnsmasq. A native <datalist> is used rather
          * than a select widget so the field stays a plain text input: typing an
@@ -157,8 +242,9 @@
                     ? ' &middot; <span class="text-danger">' + warn.join(' &middot; ') + '</span>' : '');
                 // one summary for messaging and one for gaming, built the same way;
                 // refreshed_at is null both out of use and before the first
-                // refresh, so in_use decides which wording applies
-                var summary = function (c, entriesText, offText) {
+                // refresh, so in_use decides which wording applies; extra, already
+                // escaped, comes before the problems
+                var summary = function (c, entriesText, offText, extra) {
                     c = c || {};
                     var errs = c.errors || [];
                     var problems = errs.slice(0, 3).map(esc);
@@ -175,12 +261,18 @@
                                   .toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})))
                               : "{{ lang._('not refreshed yet') }}")
                         : offText) +
+                        (extra ? ' &middot; ' + extra : '') +
                         (problems.length ? ' &middot; ' + problems.join(' &middot; ') : '');
                 };
                 $("#status-messaging").html(summary(data.messaging,
                     "{{ lang._('Messaging: %s server entries') }}", "{{ lang._('Messaging: not in use') }}"));
+                var gamesOn = (data.gaming || {}).games_enabled || 0;
                 $("#status-gaming").html(summary(data.gaming,
-                    "{{ lang._('Gaming: %s game-server entries') }}", "{{ lang._('Gaming: not in use') }}"));
+                    "{{ lang._('Gaming: %s game-server entries') }}", "{{ lang._('Gaming: not in use') }}",
+                    esc(counted(gamesOn, "{{ lang._('%s game on') }}", "{{ lang._('%s games on') }}"))));
+                /* the Games list shows what each game blocked at the last refresh */
+                gameStatus = data.gaming || null;
+                $("#grid-games").bootgrid('reload');
             });
         };
         loadStatus();
@@ -213,6 +305,7 @@
 
 <ul class="nav nav-tabs" role="tablist" id="maintabs">
     <li class="active"><a data-toggle="tab" href="#devices">{{ lang._('Devices') }}</a></li>
+    <li><a data-toggle="tab" href="#games">{{ lang._('Games') }}</a></li>
     <li><a data-toggle="tab" href="#status">{{ lang._('Status') }}</a></li>
     <li><a data-toggle="tab" id="settings_tab" href="#settings">{{ lang._('Settings') }}</a></li>
 </ul>
@@ -243,6 +336,29 @@
                 <tr>
                     <td></td>
                     <td colspan="12"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+    <div id="games" class="tab-pane fade in">
+        <table id="grid-games" class="table table-condensed table-hover table-striped"
+               data-editDialog="DialogGame" data-editAlert="change_message_base_form">
+            <thead>
+                <tr>
+                    <th data-column-id="uuid" data-type="string" data-identifier="true" data-visible="false">{{ lang._('ID') }}</th>
+                    <th data-column-id="enabled" data-width="6em" data-type="string" data-formatter="rowtoggle">{{ lang._('Enabled') }}</th>
+                    <th data-column-id="name" data-type="string" data-formatter="safe">{{ lang._('Name') }}</th>
+                    <th data-column-id="blockedBy" data-type="string" data-formatter="blockedBy" data-sortable="false">{{ lang._('Blocked by') }}</th>
+                    <th data-column-id="blocking" data-type="string" data-formatter="blocking" data-sortable="false">{{ lang._('Blocking now') }}</th>
+                    <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot>
+                <tr>
+                    <td></td>
+                    <td colspan="5"><button data-action="add" type="button" class="btn btn-xs btn-default"><span class="fa fa-plus fa-fw"></span></button></td>
                 </tr>
             </tfoot>
         </table>
@@ -289,3 +405,5 @@
 {{ partial("layout_partials/base_apply_button", {'data_endpoint': '/api/parentalcontrol/service/reconfigure'}) }}
 
 {{ partial("layout_partials/base_dialog",['fields': deviceForm, 'id':'DialogDevice', 'label':lang._('Edit device')]) }}
+
+{{ partial("layout_partials/base_dialog",['fields': gameForm, 'id':'DialogGame', 'label':lang._('Edit game')]) }}
