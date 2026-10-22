@@ -15,6 +15,7 @@ $lib = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/lib';
 require $lib . '/markers.php';
 require $lib . '/messaging.php';
 require $lib . '/gaming.php';
+require $lib . '/games.php';
 
 $scripts = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl';
 $path = $argv[1] ?? $scripts . '/gaming.json';
@@ -262,6 +263,55 @@ check('model: the internet alias name may not be any gaming alias name',
      (int)@preg_match($mask, 'NoMessaging'), (int)@preg_match($mask, 'NoInternet'),
      (int)@preg_match($mask, 'NoGamingAtNight')],
     [[0, 0, 0, 0, 0], 0, 1, 1]);
+/* the game list as the Games dialog edits it: host lists stored lower-case, so a
+   repeat is found whatever its case, and no address among them; ranges as networks */
+$type = fn(string $path): string => (string)($model->xpath("/model/items/$path")[0]['type'] ?? '');
+check('model: each game has on/off, a name, hosts, proxy hosts and ranges, as the dialog edits them',
+    [$type('games'), $type('games/enabled'), $field('games/enabled/Default'), $type('games/name'),
+     $field('games/name/Required'), $type('games/hosts'), $field('games/hosts/AsList'),
+     $field('games/hosts/IpAllowed'), $field('games/hosts/ChangeCase'), $type('games/proxy_hosts'),
+     $field('games/proxy_hosts/AsList'), $field('games/proxy_hosts/IpAllowed'),
+     $field('games/proxy_hosts/ChangeCase'), $type('games/ranges'), $field('games/ranges/AsList'),
+     $field('games/ranges/NetMaskRequired'), $field('games/ranges/AddressFamily'),
+     $field('games/ranges/WildcardEnabled'), $type('general/games_seen')],
+    ['ArrayField', 'BooleanField', '1', 'TextField', 'Y', 'HostnameField', 'Y', 'N', 'lower', 'HostnameField', 'Y',
+     'N', 'lower', 'NetworkField', 'Y', 'Y', 'ipv4', 'N', 'TextField']);
+/* The 1.4.0 migration adds every shipped game and core saves the result with
+   validation on, so one shipped game failing a check would refuse the whole upgrade;
+   a game a later release ships, added at the next sync, would be refused every
+   minute. So each must pass what a saved game must pass. */
+$shippedGames = array_map(fn(mixed $s): array => shippedEntry((array)$s), $servers ?: []);
+$refused = [];
+foreach ($shippedGames as $key => $game) {
+    $problems = gameProblems($game, array_diff_key($shippedGames, [$key => true]),
+        array_values(array_filter((array)($data['shared_hosting_domains'] ?? []), 'is_string')),
+        array_merge(guardedRanges($data, is_array($messaging) ? $messaging : null), $neverSet));
+    if ($problems !== []) {
+        $refused[$key] = $problems;
+    }
+}
+check('data: every shipped game passes the checks a saved game must pass', [count($shippedGames) > 0, $refused],
+    [true, []]);
+/* the host check above is stricter than the hosts' field; a range must carry its
+   prefix length (NetMaskRequired) and is kept as the table holds it */
+$nameMask = $field('games/name/Mask');
+$seenMask = $field('general/games_seen/Mask');
+$misfits = [];
+foreach ($shippedGames as $key => $game) {
+    if (@preg_match($seenMask, (string)$key) !== 1) {
+        $misfits[] = "key $key";
+    }
+    if (@preg_match($nameMask, $game['name']) !== 1) {
+        $misfits[] = "name {$game['name']}";
+    }
+    foreach ($game['ranges'] as $range) {
+        if (!str_contains($range, '/') || acceptRange($range) !== $range) {
+            $misfits[] = "range $range";
+        }
+    }
+}
+check('data: every shipped game\'s key, name and ranges fit their settings fields',
+    [$nameMask !== '', $seenMask !== '', $misfits], [true, true, []]);
 
 printf("\n%d passed, %d failed\n", $pass, $fail);
 exit($fail === 0 ? 0 : 1);

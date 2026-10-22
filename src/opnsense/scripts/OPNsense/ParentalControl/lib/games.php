@@ -116,8 +116,9 @@ function gamesToAdd(array $servers, array $seen, array $entries): array
 /**
  * What keeps a game from being saved: each field with its first problem, worded for
  * the form. The other games' names and host names are taken; a host may not be both a
- * host and a proxy host of one game; no host may sit on a shared hosting service, and
- * no range may leave public space or overlap a range that is never blocked.
+ * host and a proxy host of one game; no host may sit on a shared hosting service; and
+ * no range may leave public space, be wider than the table takes (acceptRange()), or
+ * overlap a range that is never blocked.
  *
  * @param array{name: string, enabled: bool, hosts: list<string>, proxy_hosts: list<string>, ranges: list<string>} $entry
  * @param array<array{name: string, enabled: bool, hosts: list<string>, proxy_hosts: list<string>, ranges: list<string>}> $others
@@ -153,6 +154,8 @@ function gameProblems(array $entry, array $others, array $sharedDomains, array $
     foreach ($entry['ranges'] as $range) {
         if (!isIpv4Cidr($range) || reachesNonPublic($range)) {
             $problems['ranges'] ??= "$range is not a public IPv4 network.";
+        } elseif (acceptRange($range) === null) {
+            $problems['ranges'] ??= "$range is wider than a /8, which no single service owns.";
         } elseif (array_filter($guarded, fn(string $g): bool => ipv4InCidr(explode('/', $range)[0], $g)
                 || ipv4InCidr(explode('/', $g)[0], $range)) !== []) {
             $problems['ranges'] ??= "$range overlaps a shared service that is never blocked.";

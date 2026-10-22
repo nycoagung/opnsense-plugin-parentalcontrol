@@ -104,6 +104,10 @@ check('problems: a proxy host also listed as one of the game\'s own hosts',
 check('problems: a private or special-purpose range',
     gameProblems(row('Mine', 'm.example', '', '10.0.0.0/8'), [], $domains, $guarded),
     ['ranges' => '10.0.0.0/8 is not a public IPv4 network.']);
+check('problems: a range wider than a /8, which the table refuses; a /8 passes',
+    [gameProblems(row('Mine', 'm.example', '', '198.0.0.0/7'), [], $domains, []),
+     gameProblems(row('Mine', 'm.example', '', '198.0.0.0/8'), [], $domains, [])],
+    [['ranges' => '198.0.0.0/7 is wider than a /8, which no single service owns.'], []]);
 check('problems: a range overlapping a guarded one, either way',
     [gameProblems(row('Mine', 'm.example', '', '198.51.100.0/25'), [], $domains, $guarded),
      gameProblems(row('Mine', 'm.example', '', '198.51.0.0/16'), [], $domains, $guarded)],

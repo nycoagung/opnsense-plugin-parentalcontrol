@@ -1,11 +1,12 @@
 #!/usr/local/bin/php
 <?php
 /**
- * The settings migration to 1.2.0: a saved app selection gains the apps added in
- * 1.2.0, and an explicitly empty selection stays empty.
+ * The settings migrations. To 1.2.0: a saved app selection gains the apps added in
+ * 1.2.0, and an explicitly empty selection stays empty. To 1.4.0: the game list is
+ * offered every game gaming.json ships, so an upgrade keeps blocking what it blocked.
  *
- * Needs plain PHP; no OPNsense: core's migration base class is stood in for below,
- * and run() gets a stand-in model with the one field it touches.
+ * Needs plain PHP; no OPNsense: core's migration base class and the model are stood
+ * in for below, with the one field and the one method the migrations touch.
  *
  *   php tests/MigrationTest.php
  */
@@ -19,10 +20,33 @@ namespace OPNsense\Base {
     }
 }
 
+namespace OPNsense\ParentalControl {
+    /* the model, standing in: it records what the 1.4.0 migration offers the list */
+    class ParentalControl
+    {
+        /** @var ?array<mixed> */
+        public ?array $offered = null;
+
+        /**
+         * @param ?array<mixed> $servers
+         * @return array{added: list<string>, clashes: list<string>}
+         */
+        public function addShippedGames(?array $servers): array
+        {
+            $this->offered = $servers;
+            return ['added' => [], 'clashes' => []];
+        }
+    }
+}
+
 namespace {
+    require __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/lib/games.php';
     require __DIR__ . '/../src/opnsense/mvc/app/models/OPNsense/ParentalControl/Migrations/M1_2_0.php';
+    require __DIR__ . '/../src/opnsense/mvc/app/models/OPNsense/ParentalControl/Migrations/M1_4_0.php';
 
     use OPNsense\ParentalControl\Migrations\M1_2_0;
+    use OPNsense\ParentalControl\Migrations\M1_4_0;
+    use OPNsense\ParentalControl\ParentalControl;
 
     $pass = $fail = 0;
 
@@ -83,6 +107,19 @@ namespace {
     check('migration: run() leaves an empty selection empty',
         $empty->value,
         '');
+
+    /* 1.4.0 reads gaming.json beside the scripts, by a path relative to itself that is
+       the same in the repository and on the firewall */
+    $shipped = json_decode((string)file_get_contents(
+        __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/gaming.json'), true);
+    $keys = array_keys((array)($shipped['servers'] ?? []));
+    $model = new ParentalControl();
+    (new M1_4_0())->run($model);
+    check('migration 1.4.0: offers every shipped game to the list',
+        [count($keys) > 0, array_keys($model->offered ?? [])],
+        [true, $keys]);
+    $xml = simplexml_load_file(__DIR__ . '/../src/opnsense/mvc/app/models/OPNsense/ParentalControl/ParentalControl.xml');
+    check('migration 1.4.0: the model is 1.4.0', $xml === false ? null : (string)$xml->version, '1.4.0');
 
     finish();
 }
