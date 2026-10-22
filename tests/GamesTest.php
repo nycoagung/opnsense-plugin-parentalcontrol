@@ -49,6 +49,10 @@ check('entry: lists split, trimmed, lower-cased, without blanks or repeats',
     ['name' => 'Game', 'enabled' => true, 'hosts' => ['a.example', 'b.example'], 'proxy_hosts' => [],
         'ranges' => ['192.0.2.0/24']]);
 check('entry: a switched-off game', row('Game', 'a.example', '', '', '0')['enabled'], false);
+/* the settings take a name with a trailing dot, as dig prints it; DNS ignores the dot */
+check('entry: a host name loses its trailing dot, as DNS compares it',
+    [row('G', 'A.Example.,b.example', 'p.example.')['hosts'], row('G', 'A.Example.,b.example', 'p.example.')['proxy_hosts']],
+    [['a.example', 'b.example'], ['p.example']]);
 check('shipped: the label names it, switched on',
     shippedEntry(['label' => 'G', 'hosts' => ['h.example'], 'proxy_hosts' => ['p.example']]),
     ['name' => 'G', 'enabled' => true, 'hosts' => ['h.example'], 'proxy_hosts' => ['p.example'], 'ranges' => []]);
@@ -98,6 +102,11 @@ check('problems: a proxy host is checked the same way',
      gameProblems(row('Mine', 'm.example', 'b.example'), [$other], $domains, $guarded)],
     [['proxy_hosts' => 'x.web.app is on a shared hosting service, so blocking it would block other sites too.'],
      ['proxy_hosts' => 'b.example is already listed for Other.']]);
+check('problems: a trailing dot hides neither a shared hosting service nor a host another game lists',
+    [gameProblems(row('Mine', 'x.web.app.'), [], $domains, $guarded),
+     gameProblems(row('Mine', 'b.example.'), [$other], $domains, $guarded)],
+    [['hosts' => 'x.web.app is on a shared hosting service, so blocking it would block other sites too.'],
+     ['hosts' => 'b.example is already listed for Other.']]);
 check('problems: a proxy host also listed as one of the game\'s own hosts',
     gameProblems(row('Mine', 'm.example', 'm.example'), [], $domains, $guarded),
     ['proxy_hosts' => 'm.example is already listed for Mine.']);

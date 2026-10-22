@@ -21,7 +21,9 @@
 /**
  * One game as the settings store it: the lists comma-separated, enabled '1' or '0'.
  * Each list comes back trimmed, without blanks or repeats, in first-seen order; host
- * names lower-cased, as DNS compares them.
+ * names lower-cased and without a trailing dot, as DNS compares them. The settings
+ * accept the dot, as dig prints a name, and every check and lookup reads the list
+ * through here, so x.web.app. is refused as x.web.app is.
  *
  * @param array<string, string> $fields enabled, name, hosts, proxy_hosts and ranges
  * @return array{name: string, enabled: bool, hosts: list<string>, proxy_hosts: list<string>, ranges: list<string>}
@@ -38,13 +40,17 @@ function gameEntry(array $fields): array
 }
 
 /**
- * A comma-separated list, trimmed, without blanks or repeats, in first-seen order.
+ * A comma-separated list, trimmed, without blanks or repeats, in first-seen order. A
+ * list of host names is lower-cased and loses each name's trailing dot.
  *
  * @return list<string>
  */
-function listField(string $value, bool $lower): array
+function listField(string $value, bool $hosts): array
 {
-    $items = array_map('trim', explode(',', $lower ? strtolower($value) : $value));
+    $items = array_map('trim', explode(',', $hosts ? strtolower($value) : $value));
+    if ($hosts) {
+        $items = array_map(fn(string $item): string => rtrim($item, '.'), $items);
+    }
     return array_values(array_unique(array_filter($items, fn(string $item): bool => $item !== '')));
 }
 
