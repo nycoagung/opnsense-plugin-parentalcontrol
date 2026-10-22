@@ -703,9 +703,10 @@ Blocking messaging is by server address, which sets its limits:
 - The list of apps is one for every device: there is no per-device choice.
 - While a device uses messaging and the firewall's own resolver is failing, each
   per-minute sync spends up to about 30 to 40 seconds on lookups while it holds its
-  lock. An Apply or a widget change made then waits, and can fail with "another
-  sync is still running" (Apply shows only "failed"); the next per-minute sync
-  applies it. Scheduled changes still go first in each run.
+  lock, and up to 15 more while a device is denied gaming (10 for the game hosts,
+  5 for the protected names). An Apply or a widget change made then waits, and can
+  fail with "another sync is still running" (Apply shows only "failed"); the next
+  per-minute sync applies it. Scheduled changes still go first in each run.
 
 Blocking gaming is by the kind of traffic games send, which sets its own limits:
 
@@ -770,7 +771,7 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | `tests/MessagingTest.php` | 173 | the messaging decision, the IPv4 helpers, the one check every range passes before a table, the order names are looked up in, which protected names count for the selected apps, the builders of the server list and its cache, the check of ranges for protected addresses, the choice of connections to drop, alias conflicts, and the scan of the configuration that uninstall relies on |
 | `tests/GamingTest.php` | 54 | the gaming decision, the UDP port alias as the complement of the safe-list, the firewall's own addresses, the destinations never treated as gaming, when no device may be denied gaming (a renamed or missing object, an incomplete never-blocked table), which DNS answers of a game host may be blocked, the plain and proxy game hosts and which answers of each count, the game-servers table from the game list, the choice of connections to drop, the markers and the gaming alias names |
 | `tests/GamingDataTest.php` | 27 | `gaming.json`: the safe-list and the game TCP ports as designed, ordered and disjoint, no port other services need, none of the ports left off on purpose, the game hosts, the one proxy host and its proxy suffix, the publisher domains, every range public and clear of the shared CDNs, the shared hosting domains, the shared front ends (the documented ones pinned, Google's generated) and every front-end range public, the shipped games' current addresses left blockable by every guard, every shipped game passing the checks a saved game must pass and fitting its settings fields; and the settings model's Gaming field, alias-name rule and game fields |
-| `tests/GamesTest.php` | 50 | the game list: a game as the settings hold it, which shipped games join the list (never one deleted or already there by name or host), the checks a game must pass to be saved, the ranges no game may block, each host's remembered addresses (kept through a failed lookup, gone with its host, an address two games share kept while either gives it), the guard every answer passes (a proxy answer in a shared range stays blockable), what each game blocks and why when nothing, and the gaming cache (0.3.0's read, damaged entries dropped one by one, written and read back the same) |
+| `tests/GamesTest.php` | 52 | the game list: a game as the settings hold it (host names without a trailing dot), which shipped games join the list (never one deleted or already there by name or host), the checks a game must pass to be saved, the ranges no game may block, each host's remembered addresses (kept through a failed lookup, gone with its host, an address two games share kept while either gives it), the guard every answer passes (a proxy answer in a shared range stays blockable), what each game blocks and why when nothing, and the gaming cache (0.3.0's read, damaged entries dropped one by one, written and read back the same) |
 | `tests/CheckGamingHostsTest.py` | 24 | which DNS answers make a game host unfit to ship: an alias to a CDN, a shared-CDN address, a non-public address, no answer; and that a passive-DNS lookup answered with an error or the daily-quota message fails the check instead of passing it, while a provider's generic name for the address itself, or a name under the game's publisher domains, is not taken for another site; that a proxy host must answer through a proxy name of its own, with a public address, which passive DNS does not take for another site; and that `--resolver` asks the given DNS server through dig, where a name the server filters fails |
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 8 | the settings migrations: to 1.2.0, a saved selection gains the new apps and an empty one stays empty; to 1.4.0, the game list is offered every shipped game, found beside the scripts |
@@ -806,19 +807,22 @@ script, run outside the browser. All were caught but one, which only drops the
 hosts' validation message, wording no test pins; one more, a kept answer only half
 damaged, was missed at first, and the check added for it catches it.
 
-**Static analysis (0.3.0)**, on 2026-10-19. PHPStan 2.3.1 at its strictest level
-(9), over the plugin's scripts, library files, `controllers/` and model, its
-migration included, with OPNsense core 26.7.7's sources and the plugin's own
-library files and model on its scan path, reports 89 findings, none of them a
-defect, and none in `lib/gaming.php`:
+**Static analysis (the editable game list)**, on 2026-10-22. PHPStan 2.3.1 at its
+strictest level (9), over the plugin's scripts, library files, `controllers/` and
+model, its migrations included, with OPNsense core 26.7.7's sources and the
+plugin's own library files and model on its scan path, reports 91 findings, none of
+them a defect, and none in `lib/games.php`, `lib/gaming.php`, the model class or
+the 1.4.0 migration:
 
-- 74 are what it cannot follow in the framework: model fields reached through
+- 76 are what it cannot follow in the framework: model fields reached through
   `__get` and iterators typed as `mixed` (44), `Config::getInstance()` typed as
   plain `object` (6), Phalcon's view and core's own docblocks naming classes that
-  do not exist (10), `config.inc` on PHP's include path (4), the API actions' JSON
-  arrays having no declared value types (9), and the migration's `run()`
-  parameter, which core's migration base class leaves untyped and an override may
-  not narrow (1).
+  do not exist (12; the view variable for the Games tab's form adds two),
+  `config.inc` on PHP's include path (4), the device and service API actions' JSON
+  arrays having no declared value types (9; the game actions declare theirs), and the 1.2.0
+  migration's `run()` parameter, which core's migration base class leaves untyped
+  and an override may not narrow (1; the 1.4.0 migration declares it `mixed` and
+  checks the model it gets).
 - 14 are in `lib/serverlist.php`: the data files and the state listing that
   configd returns are decoded from JSON, which PHPStan types as `mixed`, so it
   cannot check the calls that take their parts. The data files' shapes are pinned
@@ -832,11 +836,11 @@ defect, and none in `lib/gaming.php`:
   The list comes from the same JSON, which is not checked entry by entry, and the
   apps' turns read it by position, so the call stays.
 
-0.2.0 had 86.
+0.3.0 had 89, and 0.2.0 86.
 
 Semgrep 1.181.0, with its default, PHP, JavaScript, Python, secrets and
 security-audit rule sets, run over everything git tracks but the tests (which it
-skips), reports five findings, none of them a defect:
+skips), reports six findings, none of them a defect:
 
 - `exec-use` on the `pfctl -k` call in `sync.php` that drops a blocked device's
   connections. Its argument goes through `escapeshellarg()` and can only be an
@@ -863,6 +867,10 @@ skips), reports five findings, none of them a defect:
   lookup (`https://api.hackertarget.com/reverseiplookup/?q=<address>`), filled
   with a host name from `gaming.json` or an address it resolved to. A maintainer's
   tool, never installed.
+- `dynamic-urllib-use-detected` in `tools/build-front-end-ranges.py`, likewise: it
+  opens only Google's two published range lists, the fixed addresses
+  `https://www.gstatic.com/ipranges/goog.json` and `.../cloud.json`. A
+  maintainer's tool, never installed.
 
 Semgrep's bash parser also cannot read `install.sh` in full (`sh -n` and `dash -n`
 are clean on every script). Every function, API action, configd action and
@@ -885,8 +893,19 @@ own jQuery, Bootstrap, token field and form scripts and a stubbed API: it saves
 changed settings before applying, saves nothing when they did not change or have
 not loaded yet, and on a validation error applies nothing and brings up the tab.
 For 0.3.0 the page's Gaming columns and summary ran the same way, in use and out of
-use, with the messaging summary unchanged. Those harnesses are scratch tools and
-not in the repository. They show that the
+use, with the messaging summary unchanged. For the editable game list, the model's
+list, the 1.4.0 migration and the save checks ran through core 26.7.7's own model
+classes the same way, over scratch `config.xml` files, with every validator the
+game fields use being core's own: an upgrade from 0.3.0 kept the devices and got
+the shipped games, switched on, with their keys held; a fresh install the same;
+migrations run again changed nothing; a deleted shipped game was not added back; a
+list brought in from elsewhere got every shipped game reported as a clash and none
+twice; each save check gave its message on its field; a fine game saved with
+validation on; and a game flagged after a data update neither blocked another save
+nor stopped being switched off. The Games tab's script ran outside the browser
+against a stand-in for jQuery and the grid: what each game is blocked by, what it
+blocks or why not, escaping, and the grid's reload with each status. Those
+harnesses are scratch tools and not in the repository. They show that the
 logic does what it should, not that OPNsense agrees.
 
 **On OPNsense.** 0.1.0 was installed on a live OPNsense 26.7.7 firewall from its

@@ -217,26 +217,29 @@ Then put them back:
 
 ## 12 The Games tab
 
-With the test device still on Blocked:
+With the test device still on Blocked. The Blocking now column is read with the
+status: when the page loads, on the Status tab's Refresh, and after Apply, which
+also runs a sync at once.
 
 - [ ] Each game's row says what it is blocked by, such as "2 hosts" or "2 ranges",
-      and, within a minute, what it is blocking, such as "12 addresses", or why
-      nothing, such as "no answer".
+      and what it is blocking, such as "12 addresses", or why nothing, such as "no
+      answer".
 - [ ] The Status summary's gaming part ends with how many games are on.
 
-Switch off a game that shows addresses, one the test device has installed:
+Switch off a game that shows addresses, one the test device has installed, and
+press Apply:
 
-- [ ] Within a minute its row says "switched off", and the Status summary's
-      game-server entries drop by about its count (less any address another game
-      also gives).
-- [ ] The game connects on the test device. Switch it on again: within a minute it
-      fails again, and the entries are back.
+- [ ] Its row says "switched off", and the Status summary's game-server entries
+      drop by about its count (less any address another game also gives).
+- [ ] The game connects on the test device. Switch it on again and press Apply: it
+      fails again within a minute, and the entries are back.
 
 Add a game, and try each of these in the dialog; each is refused with its message
 next to the field, and nothing is saved:
 
 - [ ] a host on a shared hosting service, such as `x.web.app`: "x.web.app is on a
-      shared hosting service, so blocking it would block other sites too."
+      shared hosting service, so blocking it would block other sites too." The
+      same with a trailing dot, `x.web.app.`.
 - [ ] the range `10.0.0.0/8`: "10.0.0.0/8 is not a public IPv4 network."
 - [ ] a range inside one of the shared CDNs' ranges (`shared_cdn_ranges` in
       `messaging.json`): "… overlaps a shared service that is never blocked."
@@ -246,13 +249,16 @@ next to the field, and nothing is saved:
 - [ ] an address among the hosts: "… is not a host name. An address belongs under
       Address ranges."
 
-Then save a game whose only host is a website served through a CDN:
+Then save a game whose only host is a website served through a CDN, and press
+Apply:
 
-- [ ] Within a minute its row says "answers through a CDN or shared front end",
-      and the Status summary's game-server entries do not change.
+- [ ] Its row says "answers through a CDN or shared front end", and the Status
+      summary's game-server entries do not change.
 - [ ] Delete it: it leaves the list, and the entries still do not change.
 
-Run the installer a second time (`configctl parentalcontrol install`):
+Run the installer a second time, the same way as in section 1. For a branch build
+that is the same command again: `configctl parentalcontrol install` fetches the
+released version, which would replace the build under test.
 
 - [ ] No game appears twice, and the games keep their settings.
 - [ ] The messaging summary's server entries are the same as before this section.
