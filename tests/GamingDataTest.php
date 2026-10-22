@@ -14,6 +14,7 @@
 $lib = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl/lib';
 require $lib . '/markers.php';
 require $lib . '/messaging.php';
+require $lib . '/gaming.php';
 
 $scripts = __DIR__ . '/../src/opnsense/scripts/OPNsense/ParentalControl';
 $path = $argv[1] ?? $scripts . '/gaming.json';
@@ -188,6 +189,50 @@ check('data: the publisher domains are the design\'s',
         'heart_of_vegas' => ['heartofvegasslots.com', 'productmadness.com'],
         'lightning_link' => ['productmadness.com'],
     ]);
+
+/* Shared services no game may block: a host on a shared hosting domain is refused when
+   a game is saved, and an address in a shared front end is never blocked, whichever
+   game's host gave it. Google's front ends are generated
+   (tools/build-front-end-ranges.py); the others are the documented ones. */
+check('data: the shared hosting domains are the design\'s', $data['shared_hosting_domains'] ?? null, [
+    'akamaiedge.net', 'akamaihd.net', 'akamaized.net', 'appspot.com', 'cloudflare.net', 'cloudfront.net',
+    'edgekey.net', 'edgesuite.net', 'fastly.net', 'fastlylb.net', 'firebaseapp.com', 'github.io',
+    'googleapis.com', 'netlify.app', 'pages.dev', 'run.app', 'vercel.app', 'web.app', 'workers.dev',
+]);
+$frontEnds = is_array($data['shared_front_end_ranges'] ?? null) ? $data['shared_front_end_ranges'] : [];
+check('data: the documented front ends are pinned, and Google\'s is generated',
+    [array_diff_key($frontEnds, ['google' => true]), count((array)($frontEnds['google'] ?? [])) > 20],
+    [['firebase_hosting' => ['199.36.158.100/32'], 'vercel' => ['76.76.21.0/24'], 'netlify' => ['75.2.60.5/32'],
+      'github_pages' => ['185.199.108.0/22']], true]);
+$frontList = array_merge(...array_values(array_map(fn(mixed $l): array => (array)$l, $frontEnds ?: [[]])));
+check('data: every front-end range is a public IPv4 network',
+    [$frontList !== [], array_values(array_filter($frontList,
+        fn(mixed $r): bool => !is_string($r) || !isIpv4Cidr($r) || reachesNonPublic($r)))],
+    [true, []]);
+$serverRanges = array_merge(...array_values(array_map(fn(array $s): array => $s['ranges'] ?? [], $servers ?: [[]])));
+check('data: no shipped range overlaps a front-end range',
+    [$frontList !== [], array_values(array_filter($serverRanges, fn(string $r): bool => array_filter($frontList,
+        fn(string $f): bool => ipv4InCidr(explode('/', $r)[0], $f) || ipv4InCidr(explode('/', $f)[0], $r)) !== []))],
+    [true, []]);
+/* What the shipped games' plain hosts answered on 2026-10-21. The guards must leave
+   every one blockable, or a shipped game would quietly stop being blocked. Last War's
+   proxy answer sits in Cloudflare's range on purpose (its own rule), so only the
+   never-blocked set may not hold it. */
+$gameAddresses = [
+    '130.211.14.80', '35.201.114.128', '34.49.26.121', '8.214.160.189', '47.90.175.112', '8.216.77.226',
+    '8.216.77.38', '8.216.76.112', '47.245.92.113', '3.14.77.21', '3.150.147.73', '47.90.173.201',
+    '47.245.156.243', '8.221.196.109', '8.216.76.55', '47.90.174.161', '47.245.158.170', '8.221.200.47',
+    '8.216.76.234', '170.33.13.184', '166.117.55.137', '166.117.204.28', '136.107.113.253', '15.197.233.176',
+    '3.33.246.23', '100.48.146.215', '3.234.124.169', '3.229.210.1', '207.90.252.1', '207.90.253.1',
+    '207.90.252.2', '207.90.253.2', '34.36.77.148', '34.111.200.135', '34.149.89.120', '34.49.2.4',
+];
+$neverSet = neverBlocked([], $data, is_array($messaging) ? $messaging : null);
+$guardSet = array_merge($frontList, (array)($messaging['shared_cdn_ranges'] ?? []), $neverSet);
+check('data: the shipped games\' current addresses stay blockable',
+    [count($gameAddresses), $frontList !== [],
+     array_values(array_filter($gameAddresses, fn(string $ip): bool => ipv4InAny($ip, $guardSet))),
+     ipv4InAny('172.65.189.95', $neverSet)],
+    [36, true, [], false]);
 
 /* ---- the settings model ---------------------------------------------------- */
 
