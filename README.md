@@ -447,8 +447,11 @@ Blocking messaging).
 The switch answers at once and shows the device's new state: the override is
 saved, and the sync that applies it runs in the background, so the block list
 follows a few seconds later, or within the minute when a sync is already running.
-If the change gets no answer in time, the widget still shows what the firewall
-has, with a note saying the change was not confirmed.
+The count under the table ("1 blocked via NoInternet") is read from the block
+list, so it can lag for those seconds; the widget reads the status again 20
+seconds after a change, by when it has caught up. If the change gets no answer
+in time, or the firewall refuses it, the widget still shows what the firewall
+has, with a note saying the change was not confirmed or why it was refused.
 
 ## Why existing connections get dropped
 
@@ -719,8 +722,10 @@ Blocking messaging is by server address, which sets its limits:
   lock, and up to 15 more while a device is denied gaming (10 for the game hosts,
   5 for the protected names). An Apply made then waits, and can fail with "another
   sync is still running" (Apply shows only "failed"); the next per-minute sync
-  applies it. A widget change answers at once and waits in the background the same
-  way. Scheduled changes still go first in each run.
+  applies it. A widget change answers at once and its sync waits in the background
+  the same way: the widget already shows the new state, but if that sync gives up
+  after 30 seconds the block list keeps the old state until the next per-minute
+  sync applies it. Scheduled changes still go first in each run.
 
 Blocking gaming is by the kind of traffic games send, which sets its own limits:
 
@@ -773,7 +778,8 @@ enforcement never lapses.
 
 **Tests.** Thirteen test files, which need no OPNsense and no network, only PHP 8.1
 or later (with its dom, ctype, filter and SimpleXML extensions), Python 3 and, for
-the widget, Node.js 18 or later:
+the widget, Node.js 22 or later (it loads the widget's ES module without a
+package.json):
 
     php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; php tests/GamingTest.php; php tests/GamingDataTest.php; php tests/GamesTest.php; php tests/OverrideTest.php; python3 -I tests/BuildMessagingDataTest.py; python3 -I tests/CheckGamingHostsTest.py; python3 -I tests/BuildFrontEndRangesTest.py; node --test tests/WidgetTest.mjs
 
@@ -792,7 +798,7 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | `tests/MigrationTest.php` | 8 | the settings migrations: to 1.2.0, a saved selection gains the new apps and an empty one stays empty; to 1.4.0, the game list is offered every shipped game, found beside the scripts |
 | `tests/FirewallTest.php` | 10 | loading a pf table: entries checked and put in pf's own form first, one pfctl call for the additions and one for the deletions, a failed call reported, and configd for each address only for a small change |
 | `tests/OverrideTest.php` | 7 | the widget's switch on the server: an override is saved and its sync started in the background, for each value; a GET, an unknown value or an unknown device refused with nothing saved or synced |
-| `tests/WidgetTest.mjs` | 3 | the widget's switch: the override posted once and the firewall's state shown after it; the state shown even when the change gets no answer in time, with a note saying so; the loading cover taken down afterwards |
+| `tests/WidgetTest.mjs` | 7 | the widget's switch: the override posted once and the firewall's state shown after it; the state shown even when the change gets no answer in time or is refused, with a note saying which; no claim to show the firewall's state when the status cannot be read either; one more status read after a change, so the block count catches up, cancelled when the widget closes; the loading cover taken down afterwards |
 | `tests/BuildMessagingDataTest.py` | 41 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and from Meta's per-site server names and checks them, that it stops behind a filtering or failing resolver and on a per-site list that shrank, that no address is in two apps' ranges, and its check of the protected names' owners |
 | `tests/BuildFrontEndRangesTest.py` | 4 | how the front-end tool takes Google's front ends: every range Google uses less the ranges its cloud customers get, adjacent ranges collapsed, nothing left when the cloud ranges cover everything, IPv6 and other keys ignored |
 

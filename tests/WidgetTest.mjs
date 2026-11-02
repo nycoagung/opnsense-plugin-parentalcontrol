@@ -46,7 +46,14 @@ const status = (blocked, override) => ({
     devices: [{ uuid: 'dev-1', name: 'Tablet-Example', address: '192.0.2.10', is_mac: false, resolved: '192.0.2.10',
                 blocked, override, reason: blocked ? 'outside allowed hours' : 'override: allow' }],
 });
-const fresh = () => { page = {}; calls = []; return new ParentalControl({}); };
+const fresh = () => {
+    page = {}; calls = [];
+    const w = new ParentalControl({});
+    w.followUpMs = 5;           // the follow-up status read, without the wait
+    return w;
+};
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const methods = () => calls.map((c) => c.method);
 
 test('a switch posts the override once, then shows the state the firewall reports', async () => {
     const w = fresh();
@@ -59,6 +66,7 @@ test('a switch posts the override once, then shows the state the firewall report
     assert.match(page['.pc-body'].html, /btn-success/);
     assert.match(page['.pc-body'].html, /override: allow/);
     assert.equal(page['.pc-msg small'].text, '0 blocked via NoInternet');
+    w.onWidgetClose();
 });
 
 test('when the change gets no answer in time, the widget still shows what the firewall has, and says so', async () => {
@@ -70,7 +78,56 @@ test('when the change gets no answer in time, the widget still shows what the fi
     await w._setOverride('dev-1', 'allow');
     assert.deepEqual(calls.map((c) => c.method), ['POST', 'GET'], 'the status is read after the failed change');
     assert.match(page['.pc-body'].html, /btn-success/, 'the switch shows the state the firewall reports');
-    assert.match(page['.pc-msg small'].text, /no answer/i, 'the note says the change was not confirmed');
+    assert.match(page['.pc-msg small'].text, /not confirmed/i, 'the note says the change was not confirmed');
+    assert.match(page['.pc-msg small'].text, /what the firewall has now/i);
+    w.onWidgetClose();
+});
+
+test('a change the firewall refuses is reported with its reason, and the status still read', async () => {
+    const w = fresh();
+    answer = async (url) => (url.includes('setOverride')
+        ? { result: 'failed', message: 'unknown device' } : status(true, 'none'));
+    await w._setOverride('dev-1', 'allow');
+    assert.deepEqual(methods(), ['POST', 'GET']);
+    assert.match(page['.pc-msg small'].text, /refused: unknown device/i);
+    w.onWidgetClose();
+});
+
+test('when the status cannot be read either, the note does not claim to show the firewall', async () => {
+    const w = fresh();
+    answer = async () => { throw { textStatus: 'error' }; };
+    await w._setOverride('dev-1', 'allow');
+    assert.match(page['.pc-body'].html, /Unable to read status/);
+    assert.match(page['.pc-msg small'].text, /not confirmed/i);
+    assert.doesNotMatch(page['.pc-msg small'].text, /firewall has now/i);
+    w.onWidgetClose();
+});
+
+test('the status is read again once the background sync has had time, so the block count catches up', async () => {
+    const w = fresh();
+    let synced = false;         // pf's table changes only when the background sync has run
+    answer = async (url) => {
+        if (url.includes('setOverride')) return { result: 'saved', override: 'block' };
+        const s = status(true, 'block');
+        s.in_alias = synced ? 1 : 0;
+        return s;
+    };
+    await w._setOverride('dev-1', 'block');
+    assert.equal(page['.pc-msg small'].text, '0 blocked via NoInternet');
+    synced = true;
+    await pause(30);
+    assert.deepEqual(methods(), ['POST', 'GET', 'GET'], 'one more status read after the change');
+    assert.equal(page['.pc-msg small'].text, '1 blocked via NoInternet');
+    w.onWidgetClose();
+});
+
+test('closing the widget cancels the follow-up status read', async () => {
+    const w = fresh();
+    answer = async (url) => (url.includes('setOverride') ? { result: 'saved', override: 'allow' } : status(false, 'allow'));
+    await w._setOverride('dev-1', 'allow');
+    w.onWidgetClose();
+    await pause(30);
+    assert.deepEqual(methods(), ['POST', 'GET']);
 });
 
 test('the loading cover is taken down when the change and the refresh are done', async () => {
@@ -79,4 +136,5 @@ test('the loading cover is taken down when the change and the refresh are done',
     await w._setOverride('dev-1', 'block');
     assert.equal(w._n, 0);
     assert.equal(page['.pc-loading'].css.display, 'none');
+    w.onWidgetClose();
 });

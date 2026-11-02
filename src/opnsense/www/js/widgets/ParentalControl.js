@@ -11,7 +11,9 @@
  *
  * Device state is never computed here. It comes from the same sync script the
  * cron run and the settings page use, so the widget cannot disagree with what
- * is actually enforced.
+ * the settings decide. Right after a change the block count under the table can
+ * lag until the background sync has applied it; the widget reads the status
+ * again then.
  */
 
 export default class ParentalControl extends BaseWidget {
@@ -19,6 +21,7 @@ export default class ParentalControl extends BaseWidget {
     constructor(config) {
         super(config);
         this.tickTimeout = 60;
+        this.followUpMs = 20000;    // a sync looking up the messaging and gaming servers takes 7-17 s
         this.rows = [];
     }
 
@@ -88,26 +91,35 @@ export default class ParentalControl extends BaseWidget {
 
     // The status is read whatever the change request did: a request that gets no
     // answer in time may still have been applied, and the switch must show what the
-    // firewall has, not what it had.
+    // firewall has, not what it had. The override is applied by a sync running in
+    // the background, so the status is read once more when that has had time, for
+    // the block count under the table to catch up.
     async _setOverride(uuid, value) {
         this._busy(true);
-        let answered = true;
+        let note = '';
         try {
-            await this.ajaxCall(`/api/parentalcontrol/settings/setOverride/${uuid}`,
-                                JSON.stringify({ override: value }), 'POST');
+            const res = await this.ajaxCall(`/api/parentalcontrol/settings/setOverride/${uuid}`,
+                                            JSON.stringify({ override: value }), 'POST');
+            if (!res || res.result !== 'saved') {
+                note = 'The change was refused' + (res && res.message ? `: ${res.message}` : '');
+            }
         } catch (e) {
-            answered = false;
+            note = 'The change was not confirmed';
         }
+        let shown = false;
         try {
-            await this.refresh();
+            shown = await this.refresh();
         } finally { this._busy(false); }
-        if (!answered) {
-            $('.pc-msg small').text('No answer to the change - this is what the firewall has now');
+        if (note) {
+            $('.pc-msg small').text(shown ? `${note} - the list shows what the firewall has now` : note);
         }
+        clearTimeout(this._followUp);
+        this._followUp = setTimeout(() => { this._followUp = null; this.refresh(); }, this.followUpMs);
     }
 
     async onWidgetTick() { await this.refresh(); }
 
+    // true when the devices were shown from a status read just now
     async refresh() {
         this._busy(true);
         try {
@@ -115,12 +127,14 @@ export default class ParentalControl extends BaseWidget {
             if (!data || !Array.isArray(data.devices)) {
                 $('.pc-body').html('<tr><td colspan="3" class="text-muted">' +
                     '<a href="/ui/parentalcontrol">Not configured yet</a></td></tr>');
-                return;
+                return false;
             }
             this.rows = data.devices;
             this._render(data);
+            return true;
         } catch (e) {
             $('.pc-body').html('<tr><td colspan="3" class="text-danger">Unable to read status</td></tr>');
+            return false;
         } finally { this._busy(false); }
     }
 
@@ -163,5 +177,9 @@ export default class ParentalControl extends BaseWidget {
         this._fitHeight();
     }
 
-    onWidgetClose() { $(document).off('.parentalcontrol'); }
+    onWidgetClose() {
+        $(document).off('.parentalcontrol');
+        clearTimeout(this._followUp);
+        this._followUp = null;
+    }
 }

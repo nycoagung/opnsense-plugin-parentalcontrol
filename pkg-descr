@@ -36,8 +36,11 @@ Plugin Changelog
   for the sync, which takes many seconds while a device uses the messaging or
   gaming block, so the dashboard gave up and the switch kept its old state
   until the page was reloaded
-* If a change gets no answer in time, the widget still shows what the firewall
-  has, with a note saying the change was not confirmed
+* If a change gets no answer in time, or the firewall refuses it, the widget
+  still shows what the firewall has, with a note saying the change was not
+  confirmed or why it was refused
+* The widget reads the status again 20 seconds after a change, so the count of
+  blocked devices under the table catches up with the background sync
 
 0.4.0
 
