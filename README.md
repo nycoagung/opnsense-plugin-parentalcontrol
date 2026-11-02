@@ -444,6 +444,12 @@ button clears the override and hands the device back to its schedule. Override
 steers only the internet: a device's Messaging setting never looks at it (see
 Blocking messaging).
 
+The switch answers at once and shows the device's new state: the override is
+saved, and the sync that applies it runs in the background, so the block list
+follows a few seconds later, or within the minute when a sync is already running.
+If the change gets no answer in time, the widget still shows what the firewall
+has, with a note saying the change was not confirmed.
+
 ## Why existing connections get dropped
 
 A device that becomes blocked keeps its established connections — an in-progress
@@ -711,9 +717,10 @@ Blocking messaging is by server address, which sets its limits:
 - While a device uses messaging and the firewall's own resolver is failing, each
   per-minute sync spends up to about 30 to 40 seconds on lookups while it holds its
   lock, and up to 15 more while a device is denied gaming (10 for the game hosts,
-  5 for the protected names). An Apply or a widget change made then waits, and can
-  fail with "another sync is still running" (Apply shows only "failed"); the next
-  per-minute sync applies it. Scheduled changes still go first in each run.
+  5 for the protected names). An Apply made then waits, and can fail with "another
+  sync is still running" (Apply shows only "failed"); the next per-minute sync
+  applies it. A widget change answers at once and waits in the background the same
+  way. Scheduled changes still go first in each run.
 
 Blocking gaming is by the kind of traffic games send, which sets its own limits:
 
@@ -764,13 +771,14 @@ renaming the alias in both directions, confirming the aliases rename in place, t
 rule follows, the old pf table is flushed, no duplicate pair appears and
 enforcement never lapses.
 
-**Tests.** Eleven test files, which need no OPNsense and no network, only PHP 8.1
-or later (with its dom, ctype, filter and SimpleXML extensions) and Python 3:
+**Tests.** Thirteen test files, which need no OPNsense and no network, only PHP 8.1
+or later (with its dom, ctype, filter and SimpleXML extensions), Python 3 and, for
+the widget, Node.js 18 or later:
 
-    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; php tests/GamingTest.php; php tests/GamingDataTest.php; php tests/GamesTest.php; python3 -I tests/BuildMessagingDataTest.py; python3 -I tests/CheckGamingHostsTest.py; python3 -I tests/BuildFrontEndRangesTest.py
+    php tests/ScheduleTest.php; php tests/MessagingTest.php; php tests/MessagingDataTest.php; php tests/MigrationTest.php; php tests/FirewallTest.php; php tests/GamingTest.php; php tests/GamingDataTest.php; php tests/GamesTest.php; php tests/OverrideTest.php; python3 -I tests/BuildMessagingDataTest.py; python3 -I tests/CheckGamingHostsTest.py; python3 -I tests/BuildFrontEndRangesTest.py; node --test tests/WidgetTest.mjs
 
 Each prints a line per check and exits 1 when one fails. All pass, re-run on
-2026-10-22:
+2026-11-02:
 
 | File | Checks | What it covers |
 |---|---|---|
@@ -783,6 +791,8 @@ Each prints a line per check and exits 1 when one fails. All pass, re-run on
 | `tests/MessagingDataTest.php` | 45 | `messaging.json`: no private range or shared-CDN range in it, no address in two apps' ranges, the servers of WhatsApp and Facebook & Instagram at Meta's sites, no blocked range reaching into special-purpose space, a host name for every app, a protected name listed by an app only when that app owns it, the owners, the apps' fallback, gateway and message-connection names, Telegram's extra range, Viber's, KakaoTalk's and LINE's ranges (no wider than /8, clear of the shared CDNs and the notification ranges), the Facebook & Instagram list, the notification ranges and names and the protected Facebook and Instagram names pinned, and its agreement with the settings model, which selects every app by default |
 | `tests/MigrationTest.php` | 8 | the settings migrations: to 1.2.0, a saved selection gains the new apps and an empty one stays empty; to 1.4.0, the game list is offered every shipped game, found beside the scripts |
 | `tests/FirewallTest.php` | 10 | loading a pf table: entries checked and put in pf's own form first, one pfctl call for the additions and one for the deletions, a failed call reported, and configd for each address only for a small change |
+| `tests/OverrideTest.php` | 7 | the widget's switch on the server: an override is saved and its sync started in the background, for each value; a GET, an unknown value or an unknown device refused with nothing saved or synced |
+| `tests/WidgetTest.mjs` | 3 | the widget's switch: the override posted once and the firewall's state shown after it; the state shown even when the change gets no answer in time, with a note saying so; the loading cover taken down afterwards |
 | `tests/BuildMessagingDataTest.py` | 41 | which part of Microsoft's list the data generator turns into ranges, how it builds the apps' ranges from RIPEstat and ARIN and from Meta's per-site server names and checks them, that it stops behind a filtering or failing resolver and on a per-site list that shrank, that no address is in two apps' ranges, and its check of the protected names' owners |
 | `tests/BuildFrontEndRangesTest.py` | 4 | how the front-end tool takes Google's front ends: every range Google uses less the ranges its cloud customers get, adjacent ranges collapsed, nothing left when the cloud ranges cover everything, IPv6 and other keys ignored |
 

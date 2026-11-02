@@ -86,15 +86,24 @@ export default class ParentalControl extends BaseWidget {
         await this.refresh();
     }
 
+    // The status is read whatever the change request did: a request that gets no
+    // answer in time may still have been applied, and the switch must show what the
+    // firewall has, not what it had.
     async _setOverride(uuid, value) {
         this._busy(true);
+        let answered = true;
         try {
             await this.ajaxCall(`/api/parentalcontrol/settings/setOverride/${uuid}`,
                                 JSON.stringify({ override: value }), 'POST');
-            await this.refresh();
         } catch (e) {
-            $('.pc-msg small').text('Could not apply the change');
+            answered = false;
+        }
+        try {
+            await this.refresh();
         } finally { this._busy(false); }
+        if (!answered) {
+            $('.pc-msg small').text('No answer to the change - this is what the firewall has now');
+        }
     }
 
     async onWidgetTick() { await this.refresh(); }

@@ -29,6 +29,16 @@ WWW: https://github.com/nycoagung/opnsense-plugin-parentalcontrol
 Plugin Changelog
 ----------------
 
+0.4.1
+
+* The widget's switch answers at once and shows the device's new state. It
+  saves the override and starts the sync in the background; before, it waited
+  for the sync, which takes many seconds while a device uses the messaging or
+  gaming block, so the dashboard gave up and the switch kept its old state
+  until the page was reloaded
+* If a change gets no answer in time, the widget still shows what the firewall
+  has, with a note saying the change was not confirmed
+
 0.4.0
 
 * A Games tab holds the games whose servers are blocked for every device denied
