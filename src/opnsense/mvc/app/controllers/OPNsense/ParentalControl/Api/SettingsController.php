@@ -88,8 +88,11 @@ class SettingsController extends ApiMutableModelControllerBase
     }
 
     /**
-     * Set a device's manual override and apply immediately. This is what the
-     * dashboard widget's on/off switch calls.
+     * Set a device's manual override and start a sync to apply it. This is what the
+     * dashboard widget's on/off switch calls. The sync runs in the background: while a
+     * device uses the messaging or gaming block a run takes many seconds, and the
+     * dashboard gives a request 5 seconds before it sends it again. The widget then
+     * reads the status, which the saved override already decides.
      */
     public function setOverrideAction(?string $uuid = null): array
     {
@@ -111,7 +114,7 @@ class SettingsController extends ApiMutableModelControllerBase
         }
         $this->save();
         $backend = new Backend();
-        $backend->configdRun('parentalcontrol sync');
+        $backend->configdRun('parentalcontrol sync', true);
         return ['result' => 'saved', 'override' => $value];
     }
 }
